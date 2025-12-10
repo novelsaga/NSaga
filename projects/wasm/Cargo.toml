@@ -1,0 +1,19 @@
+[package]
+  edition.workspace = true
+  name              = "novelsaga-wasm"
+  version.workspace = true
+
+[lib]
+  crate-type = ["cdylib"]
+
+[dependencies]
+  console_error_panic_hook = "0.1"
+  novelsaga-core           = { path = "../core" }
+  wasm-bindgen             = "0.2"
+  wee_alloc                = "0.4"
+
+  [package.metadata.wasm-pack.profile.release]
+    wasm-opt = ["-Oz", "--enable-bulk-memory"]
+
+[lints]
+  workspace = true

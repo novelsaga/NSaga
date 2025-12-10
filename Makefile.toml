@@ -1,0 +1,288 @@
+[config]
+  default_to_workspace = false
+  skip_core_tasks      = true
+
+[env]
+  ANDROID_ABI                          = "arm64-v8a"
+  ANDROID_OUT_DIR                      = "out/android"
+  ANDROID_PROJECT_DIR                  = "projects/android"
+  ANDROID_TARGET                       = "aarch64-linux-android"
+  CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+  CLI_OUT_DIR                          = "out/cli"
+  CLI_PROJECT_DIR                      = "projects/cli"
+  OUT_DIR                              = "out"
+  WASM_OUT_DIR                         = "out/wasm"
+  WASM_PROJECT_DIR                     = "projects/wasm"
+
+  # ==================== WASM 构建 ====================
+
+[tasks.wasm]
+  description = "Build and optimize WASM package"
+  script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "🔨 Building NovelSaga WASM..."
+
+# 检查 wasm-pack
+if ! command -v wasm-pack &> /dev/null; then
+    echo "❌ wasm-pack not found, installing..."
+    cargo install wasm-pack
+fi
+
+# 清理并创建输出目录
+rm -rf "${WASM_OUT_DIR}"
+mkdir -p "${WASM_OUT_DIR}"
+
+# 构建
+echo "📦 Building with wasm-pack..."
+cd "${WASM_PROJECT_DIR}"
+wasm-pack build --target web --release --out-dir "../../${WASM_OUT_DIR}"
+
+# 使用 wasm-opt 进一步优化(如果可用)
+cd ../..
+if command -v wasm-opt &> /dev/null; then
+    echo ""
+    echo "🔧 Optimizing with wasm-opt..."
+    wasm-opt -Oz "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm" -o "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm.opt"
+    mv "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm.opt" "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm"
+    echo "✅ Optimization complete!"
+else
+    echo "⚠️  wasm-opt not found, skipping additional optimization"
+fi
+
+echo ""
+echo "✅ Build complete!"
+echo "📊 Package size:"
+du -h "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm"
+'''
+
+  # ==================== Android 构建 ====================
+
+[tasks.android]
+  description = "Build Android library (aarch64 only)"
+  script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "🤖 Building NovelSaga Android..."
+
+# 清理并创建输出目录
+rm -rf "${ANDROID_OUT_DIR}"
+mkdir -p "${ANDROID_OUT_DIR}/jniLibs/${ANDROID_ABI}"
+
+echo ""
+echo "🔨 Building for ${ANDROID_TARGET}..."
+cd "${ANDROID_PROJECT_DIR}"
+cargo build --target "${ANDROID_TARGET}" --release
+
+# 复制到输出目录
+cp "../../target/${ANDROID_TARGET}/release/libnovelsaga_android.so" "../../${ANDROID_OUT_DIR}/jniLibs/${ANDROID_ABI}/"
+
+cd ../..
+echo "✅ ${ANDROID_TARGET} -> ${ANDROID_OUT_DIR}/jniLibs/${ANDROID_ABI}/libnovelsaga_android.so"
+
+echo ""
+echo "✅ Android build complete!"
+echo "📊 Library size:"
+du -h "${ANDROID_OUT_DIR}/jniLibs/${ANDROID_ABI}/libnovelsaga_android.so"
+
+echo ""
+echo "🚀 Ready to integrate with Android project!"
+echo "   Copy ${ANDROID_OUT_DIR}/jniLibs/ to your Android app's src/main/jniLibs/"
+'''
+
+  # ==================== CLI 跨平台构建 ====================
+
+[tasks.cli]
+  description = "Build CLI for a single target platform"
+  script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 从环境变量获取目标，如果未设置则根据当前系统推断
+if [ -z "${CLI_TARGET:-}" ]; then
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64)
+            CLI_TARGET="linux-x64"
+            ;;
+        Linux-aarch64)
+            CLI_TARGET="linux-arm64"
+            ;;
+        Darwin-x86_64)
+            CLI_TARGET="macos-x64"
+            ;;
+        Darwin-arm64)
+            CLI_TARGET="macos-arm64"
+            ;;
+        *)
+            echo "❌ Unsupported platform: $(uname -s)-$(uname -m)"
+            exit 1
+            ;;
+    esac
+fi
+
+echo "🚀 Building NovelSaga CLI for $CLI_TARGET..."
+
+# 目标映射
+case "$CLI_TARGET" in
+    macos-arm64)
+        CARGO_TARGET="aarch64-apple-darwin"
+        BINARY_NAME="novelsaga"
+        ;;
+    macos-x64)
+        CARGO_TARGET="x86_64-apple-darwin"
+        BINARY_NAME="novelsaga"
+        ;;
+    windows-arm64)
+        CARGO_TARGET="aarch64-pc-windows-gnullvm"
+        BINARY_NAME="novelsaga.exe"
+        ;;
+    windows-x64)
+        CARGO_TARGET="x86_64-pc-windows-gnu"
+        BINARY_NAME="novelsaga.exe"
+        ;;
+    linux-arm64)
+        CARGO_TARGET="aarch64-unknown-linux-gnu"
+        BINARY_NAME="novelsaga"
+        ;;
+    linux-x64)
+        CARGO_TARGET="x86_64-unknown-linux-gnu"
+        BINARY_NAME="novelsaga"
+        ;;
+    *)
+        echo "❌ Unknown target: $CLI_TARGET"
+        echo "Available targets: macos-arm64, macos-x64, windows-arm64, windows-x64, linux-arm64, linux-x64"
+        exit 1
+        ;;
+esac
+
+# 创建输出目录
+mkdir -p "${CLI_OUT_DIR}/$CLI_TARGET"
+
+cd "${CLI_PROJECT_DIR}"
+
+echo "🔨 Building for $CARGO_TARGET..."
+
+# 使用 cargo-zigbuild 进行跨平台编译
+if cargo zigbuild --release --target "$CARGO_TARGET" 2>&1; then
+    cp "../../target/$CARGO_TARGET/release/$BINARY_NAME" "../../${CLI_OUT_DIR}/$CLI_TARGET/" 2>/dev/null || \
+    echo "⚠️  Binary not found for $CARGO_TARGET"
+
+    echo "✅ $CARGO_TARGET -> ${CLI_OUT_DIR}/$CLI_TARGET/"
+else
+    echo "❌ Failed to build for $CARGO_TARGET"
+    exit 1
+fi
+
+cd ../..
+
+echo ""
+echo "✅ CLI build complete!"
+echo "📊 Binary size:"
+du -h "${CLI_OUT_DIR}/$CLI_TARGET/$BINARY_NAME" 2>/dev/null || true
+
+echo ""
+echo "🚀 Binary ready: ${CLI_OUT_DIR}/$CLI_TARGET/$BINARY_NAME"
+'''
+
+[tasks.cli-all]
+  description = "Build CLI for all 6 platforms using cargo-zigbuild"
+  script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "🚀 Building NovelSaga CLI for all platforms..."
+
+# 清理输出目录
+rm -rf "${CLI_OUT_DIR}"
+mkdir -p "${CLI_OUT_DIR}"
+
+# 所有目标平台
+TARGETS=("macos-arm64" "macos-x64" "windows-arm64" "windows-x64" "linux-arm64" "linux-x64")
+
+# 循环构建每个平台
+for target in "${TARGETS[@]}"; do
+    echo ""
+    echo "════════════════════════════════════════"
+    CLI_TARGET="$target" makers cli
+done
+
+echo ""
+echo "════════════════════════════════════════"
+echo "✅ All platforms built successfully!"
+echo ""
+echo "📊 Binary sizes:"
+find "${CLI_OUT_DIR}" -type f \( -executable -o -name "*.exe" \) -exec du -h {} \; 2>/dev/null || true
+
+echo ""
+echo "📁 Output structure:"
+if command -v tree &> /dev/null; then
+    tree "${CLI_OUT_DIR}"
+else
+    find "${CLI_OUT_DIR}" -type f
+fi
+
+echo ""
+echo "🚀 Binaries ready for distribution!"
+'''
+
+  # ==================== 清理任务 ====================
+
+[tasks.clean-wasm]
+  description = "Clean WASM build artifacts"
+  script = '''
+rm -rf "${WASM_OUT_DIR}"
+echo "✅ WASM artifacts cleaned"
+'''
+
+[tasks.clean-android]
+  description = "Clean Android build artifacts"
+  script = '''
+rm -rf "${ANDROID_OUT_DIR}"
+echo "✅ Android artifacts cleaned"
+'''
+
+[tasks.clean-cli]
+  description = "Clean CLI build artifacts"
+  script = '''
+rm -rf "${CLI_OUT_DIR}"
+echo "✅ CLI artifacts cleaned"
+'''
+
+[tasks.clean-all]
+  dependencies = ["clean-wasm", "clean-android", "clean-cli"]
+  description = "Clean all build artifacts"
+  script = '''
+cargo clean
+rm -rf "${OUT_DIR}"
+echo "✅ All artifacts cleaned"
+'''
+
+  # ==================== 组合任务 ====================
+
+[tasks.build-all]
+  dependencies = ["wasm", "android", "cli-all"]
+  description  = "Build WASM, Android and CLI for all platforms"
+
+[tasks.default]
+  description = "Show available tasks"
+  script = '''
+echo "📋 Available tasks:"
+echo ""
+echo "  WASM:"
+echo "    makers wasm          - Build and optimize WASM"
+echo ""
+echo "  Android:"
+echo "    makers android       - Build Android lib (aarch64 only)"
+echo ""
+echo "  CLI:"
+echo "    makers cli           - Build CLI for current platform"
+echo "                           (or specify: makers cli --env CLI_TARGET=linux-x64)"
+echo "    makers cli-all       - Build CLI for all 6 platforms (using zigbuild)"
+echo ""
+echo "  Other:"
+echo "    makers build-all     - Build WASM, Android and CLI for all platforms"
+echo "    makers clean-all     - Clean all artifacts"
+echo ""
+'''
