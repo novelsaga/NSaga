@@ -8,6 +8,7 @@
   ANDROID_PROJECT_DIR                  = "projects/android"
   ANDROID_TARGET                       = "aarch64-linux-android"
   CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+  CHANGELOG_FILE                       = "CHANGELOG.md"
   CLI_OUT_DIR                          = "out/cli"
   CLI_PROJECT_DIR                      = "projects/cli"
   OUT_DIR                              = "out"
@@ -259,6 +260,28 @@ rm -rf "${OUT_DIR}"
 echo "✅ All artifacts cleaned"
 '''
 
+  # ==================== Changelog ====================
+
+[tasks.changelog]
+  description = "Generate or update CHANGELOG.md using git-cliff"
+  script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+git-cliff --config cliff.toml --output "${CHANGELOG_FILE}"
+
+echo "✅ Changelog written to ${CHANGELOG_FILE}"
+'''
+
+[tasks.changelog-preview]
+  description = "Preview unreleased changelog entries"
+  script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+git-cliff --config cliff.toml --unreleased
+'''
+
   # ==================== 组合任务 ====================
 
 [tasks.build-all]
@@ -284,5 +307,9 @@ echo ""
 echo "  Other:"
 echo "    makers build-all     - Build WASM, Android and CLI for all platforms"
 echo "    makers clean-all     - Clean all artifacts"
+echo ""
+echo "  Changelog:"
+echo "    makers changelog           - Generate or update ${CHANGELOG_FILE} via git-cliff"
+echo "    makers changelog-preview   - Show unreleased entries"
 echo ""
 '''

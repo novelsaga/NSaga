@@ -1,0 +1,14 @@
+[changelog]
+  body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+## {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first }} ([{{ commit.id | truncate(length=8) }}](https://github.com/novelsaga/nsaga/commit/{{ commit.id }}))
+{% endfor %}
+{% endfor %}
+"""
+  header = "# Changelog"
+[git]
+  conventional_commits  = true
+  filter_unconventional = true
+  tag_pattern           = "v[0-9]*"

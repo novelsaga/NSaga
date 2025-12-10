@@ -113,6 +113,7 @@
               shfmt
               cargo-zigbuild
               cargo-make
+              git-cliff
               inputs.rustowl-flake.packages.${system}.rustowl
             ])
             ++ (with pkgs.pkgsCross; [
@@ -154,7 +155,7 @@
             commitizen.enable = true;
             clippy = {
               enable = true;
-              entry = "direnv exec . cargo clippy --offline --all-features --all-targets --";
+              entry = "cargo clippy --all-targets --all-features -- -D warnings";
               pass_filenames = false;
               language = "system";
             };
