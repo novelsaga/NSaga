@@ -69,25 +69,20 @@
           config.allowUnfreePredicate = pkg: true;
           overlays = [(import rust-overlay)];
         };
-        packages = rec {
-          default = pkgs.rustPlatform.buildRustPackage {
-            pname = "novelsaga";
-            version = (lib.importTOML ./Cargo.toml).workspace.package.version;
-            src = ./.;
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-            };
-            # 构建 CLI 子项目
-            buildAndTestSubdir = "projects/cli";
-            meta = with lib; {
-              license = licenses.lgpl3Only;
-              mainProgram = "novelsaga";
-            };
-          };
-          cli = default;
-        };
+        imports = [
+          ./packages.nix
+        ];
         devenv.shells.default = {
           name = "novelsaga";
+          files = {
+            ".vscode/settings.json".json = import ./.vscode/settings.nix {
+              inherit
+                devenv-root-path
+                pkgs
+                lib
+                ;
+            };
+          };
           env = {
             RUSTC_BOOTSTRAP = "1";
             CC_x86_64_unknown_linux_gnu = "gcc";

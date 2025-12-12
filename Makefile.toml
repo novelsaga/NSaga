@@ -15,6 +15,23 @@
   WASM_OUT_DIR                         = "out/wasm"
   WASM_PROJECT_DIR                     = "projects/wasm"
 
+  # Cross toolchains (mirrors flake.nix env for consistency)
+  AR_aarch64_linux_android       = "aarch64-unknown-linux-android-ar"
+  AR_aarch64_pc_windows_gnullvm  = "aarch64-w64-mingw32-ar"
+  AR_aarch64_unknown_linux_gnu   = "aarch64-unknown-linux-gnu-ar"
+  AR_x86_64_pc_windows_gnu       = "x86_64-w64-mingw32-ar"
+  AR_x86_64_unknown_linux_gnu    = "ar"
+  CC_aarch64_linux_android       = "aarch64-unknown-linux-android-clang"
+  CC_aarch64_pc_windows_gnullvm  = "aarch64-w64-mingw32-clang"
+  CC_aarch64_unknown_linux_gnu   = "aarch64-unknown-linux-gnu-gcc"
+  CC_x86_64_pc_windows_gnu       = "x86_64-w64-mingw32-gcc"
+  CC_x86_64_unknown_linux_gnu    = "gcc"
+  CXX_aarch64_linux_android      = "aarch64-unknown-linux-android-clang++"
+  CXX_aarch64_pc_windows_gnullvm = "aarch64-w64-mingw32-clang++"
+  CXX_aarch64_unknown_linux_gnu  = "aarch64-unknown-linux-gnu-g++"
+  CXX_x86_64_pc_windows_gnu      = "x86_64-w64-mingw32-g++"
+  CXX_x86_64_unknown_linux_gnu   = "g++"
+
   # ==================== WASM 构建 ====================
 
 [tasks.wasm]
@@ -25,6 +42,8 @@ set -euo pipefail
 
 echo "🔨 Building NovelSaga WASM..."
 
+WASM_OUT_DIR_REAL="$(realpath -m "${WASM_OUT_DIR}")"
+
 # 检查 wasm-pack
 if ! command -v wasm-pack &> /dev/null; then
     echo "❌ wasm-pack not found, installing..."
@@ -32,21 +51,22 @@ if ! command -v wasm-pack &> /dev/null; then
 fi
 
 # 清理并创建输出目录
-rm -rf "${WASM_OUT_DIR}"
-mkdir -p "${WASM_OUT_DIR}"
+rm -rf "${WASM_OUT_DIR_REAL}"
+mkdir -p "${WASM_OUT_DIR_REAL}"
 
 # 构建
-echo "📦 Building with wasm-pack..."
-cd "${WASM_PROJECT_DIR}"
-wasm-pack build --target web --release --out-dir "../../${WASM_OUT_DIR}"
+echo "📦 Building with wasm-pack (no-install)..."
+pushd "${WASM_PROJECT_DIR}" >/dev/null
+WASM_BINDGEN="${WASM_BINDGEN:-$(command -v wasm-bindgen || true)}" \
+  wasm-pack build --mode no-install --target web --release --out-dir "${WASM_OUT_DIR_REAL}"
+popd >/dev/null
 
 # 使用 wasm-opt 进一步优化(如果可用)
-cd ../..
 if command -v wasm-opt &> /dev/null; then
     echo ""
     echo "🔧 Optimizing with wasm-opt..."
-    wasm-opt -Oz "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm" -o "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm.opt"
-    mv "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm.opt" "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm"
+  wasm-opt -Oz --enable-bulk-memory "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm" -o "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm.opt"
+  mv "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm.opt" "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm"
     echo "✅ Optimization complete!"
 else
     echo "⚠️  wasm-opt not found, skipping additional optimization"
@@ -55,7 +75,7 @@ fi
 echo ""
 echo "✅ Build complete!"
 echo "📊 Package size:"
-du -h "${WASM_OUT_DIR}/novelsaga_wasm_bg.wasm"
+du -h "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm"
 '''
 
   # ==================== Android 构建 ====================
@@ -69,16 +89,34 @@ set -euo pipefail
 echo "🤖 Building NovelSaga Android..."
 
 # 清理并创建输出目录
-rm -rf "${ANDROID_OUT_DIR}"
-mkdir -p "${ANDROID_OUT_DIR}/jniLibs/${ANDROID_ABI}"
+ANDROID_OUT_DIR_REAL="$(realpath -m "${ANDROID_OUT_DIR}")"
+rm -rf "${ANDROID_OUT_DIR_REAL}"
+mkdir -p "${ANDROID_OUT_DIR_REAL}/jniLibs/${ANDROID_ABI}"
+
+TARGET_DIR_REAL="$(realpath -m "${CARGO_TARGET_DIR:-$(pwd)/../../target}")"
 
 echo ""
 echo "🔨 Building for ${ANDROID_TARGET}..."
 cd "${ANDROID_PROJECT_DIR}"
-cargo build --target "${ANDROID_TARGET}" --release
+ANDROID_TRIPLE_ALT="aarch64-unknown-linux-android"
+ANDROID_CLANG="${ANDROID_CLANG:-${CC_aarch64_linux_android:-$(command -v ${ANDROID_TRIPLE_ALT}-clang || command -v aarch64-linux-android-clang || true)}}"
+ANDROID_AR="${ANDROID_AR:-${AR_aarch64_linux_android:-$(command -v ${ANDROID_TRIPLE_ALT}-ar || command -v aarch64-linux-android-ar || true)}}"
+
+if [ -z "${ANDROID_CLANG}" ] || [ -z "${ANDROID_AR}" ]; then
+  echo "❌ Android NDK toolchain not found (aarch64-linux-android-clang/ar)"
+  exit 1
+fi
+
+export CC_aarch64_linux_android="${ANDROID_CLANG}"
+export CXX_aarch64_linux_android="${ANDROID_CLANG}++"
+export AR_aarch64_linux_android="${ANDROID_AR}"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${ANDROID_CLANG}"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="${ANDROID_AR}"
+
+cargo build --target "${ANDROID_TARGET}" --release --target-dir "${TARGET_DIR_REAL}"
 
 # 复制到输出目录
-cp "../../target/${ANDROID_TARGET}/release/libnovelsaga_android.so" "../../${ANDROID_OUT_DIR}/jniLibs/${ANDROID_ABI}/"
+cp "${TARGET_DIR_REAL}/${ANDROID_TARGET}/release/libnovelsaga_android.so" "${ANDROID_OUT_DIR_REAL}/jniLibs/${ANDROID_ABI}/"
 
 cd ../..
 echo "✅ ${ANDROID_TARGET} -> ${ANDROID_OUT_DIR}/jniLibs/${ANDROID_ABI}/libnovelsaga_android.so"
@@ -158,19 +196,26 @@ case "$CLI_TARGET" in
         ;;
 esac
 
+CLI_OUT_DIR_REAL="$(realpath -m "${CLI_OUT_DIR}")"
+
 # 创建输出目录
-mkdir -p "${CLI_OUT_DIR}/$CLI_TARGET"
+mkdir -p "${CLI_OUT_DIR_REAL}/$CLI_TARGET"
 
 cd "${CLI_PROJECT_DIR}"
+
+TARGET_DIR_REAL="$(realpath -m "${CARGO_TARGET_DIR:-../../target}")"
 
 echo "🔨 Building for $CARGO_TARGET..."
 
 # 使用 cargo-zigbuild 进行跨平台编译
-if cargo zigbuild --release --target "$CARGO_TARGET" 2>&1; then
-    cp "../../target/$CARGO_TARGET/release/$BINARY_NAME" "../../${CLI_OUT_DIR}/$CLI_TARGET/" 2>/dev/null || \
-    echo "⚠️  Binary not found for $CARGO_TARGET"
-
-    echo "✅ $CARGO_TARGET -> ${CLI_OUT_DIR}/$CLI_TARGET/"
+if cargo zigbuild --release --target "$CARGO_TARGET" --target-dir "${TARGET_DIR_REAL}" 2>&1; then
+  artifact="${TARGET_DIR_REAL}/$CARGO_TARGET/release/$BINARY_NAME"
+  if [ ! -f "$artifact" ]; then
+    echo "❌ Built binary missing: $artifact"
+    exit 1
+  fi
+  cp "$artifact" "${CLI_OUT_DIR_REAL}/$CLI_TARGET/"
+  echo "✅ $CARGO_TARGET -> ${CLI_OUT_DIR_REAL}/$CLI_TARGET/"
 else
     echo "❌ Failed to build for $CARGO_TARGET"
     exit 1
@@ -206,7 +251,10 @@ TARGETS=("macos-arm64" "macos-x64" "windows-arm64" "windows-x64" "linux-arm64" "
 for target in "${TARGETS[@]}"; do
     echo ""
     echo "════════════════════════════════════════"
-    CLI_TARGET="$target" makers cli
+    cargo make --env CLI_TARGET="$target" \
+               --env CLI_OUT_DIR="${CLI_OUT_DIR}" \
+               --env CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-}" \
+               cli
 done
 
 echo ""
