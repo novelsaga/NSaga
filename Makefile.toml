@@ -93,11 +93,12 @@ ANDROID_OUT_DIR_REAL="$(realpath -m "${ANDROID_OUT_DIR}")"
 rm -rf "${ANDROID_OUT_DIR_REAL}"
 mkdir -p "${ANDROID_OUT_DIR_REAL}/jniLibs/${ANDROID_ABI}"
 
-TARGET_DIR_REAL="$(realpath -m "${CARGO_TARGET_DIR:-$(pwd)/../../target}")"
-
 echo ""
 echo "🔨 Building for ${ANDROID_TARGET}..."
 cd "${ANDROID_PROJECT_DIR}"
+
+TARGET_DIR_REAL="$(realpath -m "${CARGO_TARGET_DIR:-../../target}")"
+
 ANDROID_TRIPLE_ALT="aarch64-unknown-linux-android"
 ANDROID_CLANG="${ANDROID_CLANG:-${CC_aarch64_linux_android:-$(command -v ${ANDROID_TRIPLE_ALT}-clang || command -v aarch64-linux-android-clang || true)}}"
 ANDROID_AR="${ANDROID_AR:-${AR_aarch64_linux_android:-$(command -v ${ANDROID_TRIPLE_ALT}-ar || command -v aarch64-linux-android-ar || true)}}"
