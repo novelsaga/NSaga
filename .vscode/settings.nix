@@ -8,7 +8,9 @@
 in {
   "rust-analyzer.server.path" = "${devenvRootPathBin}/rust-analyzer";
   "rust-analyzer.check.command" = "clippy";
-  "rust-analyzer.check.extraArgs" = ["--all-features"];
+  "rust-analyzer.check.extraArgs" = [
+    # "--all-features"
+  ];
   "nix.enableLanguageServer" = true;
   "nix.serverPath" = lib.getExe pkgs.nil;
   "nix.formatterPath" = "alejandra";

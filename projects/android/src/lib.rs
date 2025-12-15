@@ -3,7 +3,7 @@ use std::{
   os::raw::c_char,
 };
 
-use novelsaga_core::{FormatConfig, format_text};
+use novelsaga_core::{article::Article, config::formatter::FormatConfig, library::formatter::format_text};
 
 /// Android JNI 导出 - 格式化文本
 ///
@@ -31,8 +31,10 @@ pub unsafe extern "C" fn novelsaga_format_text(
     blank_lines_between_paragraphs: blank_lines,
   };
 
-  // 格式化
-  let result = format_text(content_str, &config);
+  // 创建文章并格式化
+  let article = Article::new(content_str.to_string());
+  let result_article = format_text(&article, &config);
+  let result = result_article.content_ref().to_string();
 
   // 返回结果
   match CString::new(result) {

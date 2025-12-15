@@ -961,6 +961,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gray_matter"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3563a3eb8bacf11a0a6d93de7885f2cca224dddff0114e4eb8053ca0f1918acd"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "toml",
+ "yaml-rust2",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1416,6 +1429,7 @@ dependencies = [
  "clap",
  "config",
  "directories",
+ "gray_matter",
  "novelsaga-core",
  "path-absolutize",
  "serde",
@@ -1433,6 +1447,7 @@ version = "0.1.0"
 dependencies = [
  "pangu",
  "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]

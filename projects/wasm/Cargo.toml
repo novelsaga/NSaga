@@ -8,7 +8,7 @@
 
 [dependencies]
   console_error_panic_hook = "0.1"
-  novelsaga-core           = { path = "../core" }
+  novelsaga-core           = { path = "../core", features = ["wasm"] }
   wasm-bindgen             = "0.2"
   wee_alloc                = "0.4"
 

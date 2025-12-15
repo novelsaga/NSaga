@@ -150,7 +150,7 @@
             commitizen.enable = true;
             clippy = {
               enable = true;
-              entry = "cargo clippy --all-targets --all-features -- -D warnings";
+              entry = "cargo clippy --all-targets --all-features --workspace -- -D warnings";
               pass_filenames = false;
               language = "system";
             };

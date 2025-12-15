@@ -10,6 +10,9 @@
     all      = "warn"
     pedantic = "warn"
 
+  [workspace.lints.rust]
+    unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_analyzer)'] }
+
 [profile.release]
   codegen-units = 1       # Reduce parallel code generation units to improve optimization
   lto           = true    # Enable Link Time Optimization

@@ -7,11 +7,12 @@
   crate-type = ["rlib"]
 
 [dependencies]
-  pangu = "0.3.0"
-  serde = { version = "1.0", features = ["derive"], optional = true }
+  pangu        = "0.3.0"
+  serde        = { version = "1.0", features = ["derive"] }
+  wasm-bindgen = { version = "0.2", optional = true }
 
 [features]
-  serde = ["dep:serde"]
+  wasm = ["dep:wasm-bindgen"]
 
 [lints]
   workspace = true

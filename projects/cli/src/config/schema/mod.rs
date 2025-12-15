@@ -1,4 +1,4 @@
-use novelsaga_core::FormatConfig;
+use novelsaga_core::config::formatter::FormatConfig;
 use serde::{Deserialize, Serialize};
 
 /// 配置文件名(不含扩展名)
