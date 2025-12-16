@@ -1,5 +1,2 @@
-mod loader;
-mod schema;
-
-pub use loader::*;
-pub use schema::*;
+pub mod loader;
+pub mod manager;

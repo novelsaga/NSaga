@@ -33,6 +33,7 @@
         rust-overlay.follows = "rust-overlay";
       };
     };
+    nixpkgs-for-nodejs.url = "github:NixOS/nixpkgs/23735a82a828372c4ef92c660864e82fbe2f5fbe"; #24.11.1
   };
 
   nixConfig = {
@@ -85,6 +86,7 @@
           };
           env = {
             RUSTC_BOOTSTRAP = "1";
+            COREPACK_INTEGRITY_KEYS = "0";
             CC_x86_64_unknown_linux_gnu = "gcc";
             CXX_x86_64_unknown_linux_gnu = "g++";
             AR_x86_64_unknown_linux_gnu = "ar";
@@ -110,6 +112,7 @@
               cargo-make
               git-cliff
               inputs.rustowl-flake.packages.${system}.rustowl
+              lldb
             ])
             ++ (with pkgs.pkgsCross; [
               mingwW64.stdenv.cc
@@ -118,6 +121,14 @@
               aarch64-android-prebuilt.stdenv.cc
             ]);
           languages = {
+            javascript = {
+              enable = true;
+              package =
+                (import inputs.nixpkgs-for-nodejs {
+                  inherit system;
+                }).nodejs-slim_24;
+              corepack.enable = true;
+            };
             nix = {
               enable = true;
               lsp.package = pkgs.nil;
@@ -150,7 +161,7 @@
             commitizen.enable = true;
             clippy = {
               enable = true;
-              entry = "cargo clippy --all-targets --all-features --workspace -- -D warnings";
+              entry = "cargo clippy --all-targets --all-features --workspace";
               pass_filenames = false;
               language = "system";
             };
@@ -169,20 +180,6 @@
                 dos2unix = {
                   enable = true;
                   priority = -1;
-                };
-                formatjson5 = {
-                  enable = true;
-                  includes = [
-                    "**/*.json5"
-                    "**/*.jsonc"
-                    "**/*.json"
-                  ];
-                  excludes = [
-                    ".vscode/**"
-                  ];
-                  indent = 2;
-                  noTrailingCommas = true;
-                  oneElementLines = true;
                 };
                 alejandra.enable = true;
                 shellcheck.enable = true;

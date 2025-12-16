@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use novelsaga_core::config::NovelSagaConfig;
 use tokio::sync::RwLock;
 use tower_lsp::{
   Client, LanguageServer,
@@ -11,10 +12,7 @@ use tower_lsp::{
   },
 };
 
-use crate::{
-  config::{GLOBAL_CONFIG_LOADER, NovelSagaConfig},
-  core::formatter,
-};
+use crate::{config::loader::GLOBAL_CONFIG_LOADER, core::formatter};
 
 #[derive(Debug)]
 pub struct Backend {

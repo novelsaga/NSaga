@@ -3,8 +3,7 @@ use std::{
   sync::{LazyLock, RwLock},
 };
 
-use super::schema::{CONFIG_FILE_EXTENSIONS, CONFIG_FILE_NAMES};
-use crate::config::NovelSagaConfig;
+use novelsaga_core::config::{CONFIG_FILE_EXTENSIONS_BASE, CONFIG_FILE_NAMES, NovelSagaConfig};
 
 /// 全局配置加载器实例
 /// 自动根据 CLI 参数初始化
@@ -105,7 +104,7 @@ impl ConfigLoader {
     let mut candidates = Vec::new();
     // 收集所有可能的配置文件路径
     for file_name in CONFIG_FILE_NAMES {
-      for extension in CONFIG_FILE_EXTENSIONS {
+      for extension in CONFIG_FILE_EXTENSIONS_BASE {
         let config_path = dir.join(format!("{file_name}.{extension}"));
         if config_path.exists() && config_path.is_file() {
           candidates.push(config_path);
