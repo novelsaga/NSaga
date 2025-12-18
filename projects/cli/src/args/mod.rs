@@ -1,7 +1,6 @@
 use std::{path::PathBuf, sync::LazyLock};
 
 use clap::Parser;
-#[allow(clippy::wildcard_imports)]
 use path_absolutize::*;
 use version_compare::Version;
 use which::which;

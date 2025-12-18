@@ -1,3 +1,4 @@
+#![feature(mpmc_channel)]
 mod args;
 mod config;
 mod core;

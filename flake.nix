@@ -115,7 +115,7 @@
               lldb
             ])
             ++ (with pkgs.pkgsCross; [
-              mingwW64.stdenv.cc
+              ucrt64.stdenv.cc
               ucrtAarch64.stdenv.cc
               aarch64-multiplatform.stdenv.cc
               aarch64-android-prebuilt.stdenv.cc

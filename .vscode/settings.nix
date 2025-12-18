@@ -24,4 +24,7 @@ in {
     };
   };
   "dependi.rust.lockFileEnabled" = true;
+  "files.associations" = {
+    "*.json5" = "json5";
+  };
 }

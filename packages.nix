@@ -69,7 +69,7 @@ in {
         rustToolchain
         pkgs.cargo-make
         pkgs.cargo-zigbuild
-        pkgs.pkgsCross.mingwW64.stdenv.cc
+        pkgs.pkgsCross.ucrt64.stdenv.cc
         pkgs.pkgsCross.ucrtAarch64.stdenv.cc
         pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc
         pkgs.pkgsCross.aarch64-android-prebuilt.stdenv.cc
