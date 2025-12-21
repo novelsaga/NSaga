@@ -1,6 +1,0 @@
-{
-  // test command
-  fmt: {
-    indent_spaces: 2,
-  },
-}
