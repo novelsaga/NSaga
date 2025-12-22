@@ -1,19 +1,23 @@
 use std::{
   collections::{HashMap, VecDeque},
   path::{Path, PathBuf},
-  sync::{Arc, LazyLock, RwLock, mpmc::channel},
+  sync::{Arc, LazyLock, RwLock},
 };
 
 use config::FileStoredFormat;
 use novelsaga_core::config::{
   CONFIG_FILE_EXTENSIONS_BASE, CONFIG_FILE_EXTENSIONS_EXT_JS, CONFIG_FILE_EXTENSIONS_EXT_TS, CONFIG_FILE_NAMES,
-  IGNORE_CONFIG_FILE_NAMES, NovelSagaConfig, OverridableConfig, RootConfig, workspace::WorkspaceConfig,
+  IGNORE_CONFIG_FILE_NAMES, NovelSagaConfig, OverridableConfig, RootConfig,
 };
 
 use crate::args::GLOBAL_CLI;
 
-pub static CONFIG_MANAGER: LazyLock<ConfigManager> =
-  LazyLock::new(|| ConfigManager::new(GLOBAL_CLI.is_js_supported(), GLOBAL_CLI.is_ts_supported()));
+pub static CONFIG_MANAGER: LazyLock<Arc<RwLock<ConfigManager>>> = LazyLock::new(|| {
+  Arc::new(RwLock::new(ConfigManager::new(
+    GLOBAL_CLI.is_js_supported(),
+    GLOBAL_CLI.is_ts_supported(),
+  )))
+});
 
 #[derive(Debug)]
 pub struct ConfigManager {
@@ -58,19 +62,20 @@ impl ConfigManager {
 
   #[allow(dead_code)]
   pub fn get_override_config(&self, path: &Path) -> Result<OverridableConfig, config::ConfigError> {
-    // 判断缓存中是否存在
-    let cache_read = self.cache.read().unwrap();
-    if let Some(cfg) = cache_read.get(path) {
-      Ok(cfg.clone())
-    } else {
-      drop(cache_read);
-      // 加载配置文件
-      let cfg = self.load_override_config_file(path)?;
-      // 写入缓存
-      let mut cache_write = self.cache.write().unwrap();
-      cache_write.insert(path.to_path_buf(), cfg.clone());
-      Ok(cfg)
+    // 判断缓存中是否存在（只读锁）
+    {
+      let cache_read = self.cache.read().unwrap();
+      if let Some(cfg) = cache_read.get(path) {
+        return Ok(cfg.clone());
+      }
     }
+
+    // 加载配置文件
+    let cfg = self.load_override_config_file(path)?;
+    // 写入缓存（写锁）
+    let mut cache_write = self.cache.write().unwrap();
+    cache_write.insert(path.to_path_buf(), cfg.clone());
+    Ok(cfg)
   }
 
   #[allow(dead_code)]
@@ -97,9 +102,52 @@ impl ConfigManager {
     config_files
   }
 
-  /// @todo
+  /// 判断一个配置文件是否被 ignore（支持自定义 ignore 文件名，例如 `.novelsagaignore`）
   fn is_ignored_config_file(&self, path: &Path) -> bool {
-    false
+    // time
+    let start_time = std::time::Instant::now();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut binding = ignore::WalkBuilder::new(&self.root_dir);
+    let parallel_walker_builder = binding
+      .git_global(false)
+      .hidden(false)
+      .follow_links(true)
+      .max_depth(Some(64))
+      .git_global(false)
+      .require_git(false)
+      .git_exclude(false)
+      .git_ignore(false)
+      .require_git(false)
+      .ignore_case_insensitive(
+        // windows
+        #[cfg(target_os = "windows")]
+        true,
+        // other os
+        #[cfg(not(target_os = "windows"))]
+        false,
+      );
+    for ignore_file_name in IGNORE_CONFIG_FILE_NAMES {
+      parallel_walker_builder.add_custom_ignore_filename(ignore_file_name);
+    }
+    let walker = parallel_walker_builder.build_parallel();
+    walker.run(|| {
+      let tx = tx.clone();
+      Box::new(move |result| {
+        if let Ok(entry) = result {
+          let entry_path = entry.path();
+          if entry_path == path {
+            tx.send(true).unwrap();
+            return ignore::WalkState::Quit;
+          }
+        }
+        ignore::WalkState::Continue
+      })
+    });
+    let elapsed = start_time.elapsed();
+    dbg!(elapsed);
+    // walker returns an entry when the path is visible; invert result so that
+    // true means "ignored" and false means "not ignored"
+    !rx.try_recv().unwrap_or(false)
   }
 
   fn load_root_config_file(
@@ -123,7 +171,7 @@ impl ConfigManager {
     let mut cfg_builder_parents = config::Config::builder();
     for parent_cfg_path in self.get_config_files_on_every_parent_dirs(path.parent().unwrap()) {
       let config_file_result =
-        Self::find_config_file_in_directory(&parent_cfg_path.parent().unwrap(), self.js_supported, self.ts_supported);
+        Self::find_config_file_in_directory(parent_cfg_path.parent().unwrap(), self.js_supported, self.ts_supported);
       if let Ok(cfg_path) = config_file_result {
         let ext = cfg_path.extension().and_then(|s| s.to_str()).unwrap_or("");
         if CONFIG_FILE_EXTENSIONS_BASE.contains(&ext) {
@@ -308,5 +356,23 @@ mod test {
     assert!(result_sub_sub.is_ok());
     let config_sub_sub = result_sub_sub.unwrap();
     assert!(config_sub_sub.fmt.indent_spaces == 5);
+  }
+
+  #[test]
+  fn test_is_ignored_config_file() {
+    let current_dir = env!("CARGO_MANIFEST_DIR");
+    let assets_test_ignore_dir = std::path::PathBuf::from(current_dir)
+      .join("assets")
+      .join("test")
+      .join("config")
+      .join("config_manager")
+      .join("sub")
+      .join("sub")
+      .join("test-ignore.md");
+    dbg!(&assets_test_ignore_dir);
+    let manager = super::ConfigManager::new(true, true);
+    let is_ignored = manager.is_ignored_config_file(&assets_test_ignore_dir);
+    dbg!(is_ignored);
+    assert!(is_ignored);
   }
 }

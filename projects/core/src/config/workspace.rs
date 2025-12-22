@@ -8,7 +8,6 @@ pub struct WorkspaceConfig {
   pub cache_dir: String,
   #[cfg_attr(feature = "wasm", wasm_bindgen(getter_with_clone))]
   pub novelsaga_dir: String,
-  pub respect_git: bool,
 }
 
 impl Default for WorkspaceConfig {
@@ -18,7 +17,6 @@ impl Default for WorkspaceConfig {
     Self {
       cache_dir,
       novelsaga_dir,
-      respect_git: true,
     }
   }
 }

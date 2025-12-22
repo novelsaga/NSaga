@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::LazyLock};
 
 use clap::Parser;
-use path_absolutize::*;
+use path_absolutize::Absolutize;
 use version_compare::Version;
 use which::which;
 
