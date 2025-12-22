@@ -1,10 +1,12 @@
 use std::{
   collections::{HashMap, VecDeque},
   path::{Path, PathBuf},
-  sync::{Arc, LazyLock, RwLock},
+  sync::{Arc, LazyLock, RwLock, mpsc},
+  time::Duration,
 };
 
 use config::FileStoredFormat;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use novelsaga_core::config::{
   CONFIG_FILE_EXTENSIONS_BASE, CONFIG_FILE_EXTENSIONS_EXT_JS, CONFIG_FILE_EXTENSIONS_EXT_TS, CONFIG_FILE_NAMES,
   IGNORE_CONFIG_FILE_NAMES, NovelSagaConfig, OverridableConfig, RootConfig,
@@ -27,6 +29,7 @@ pub struct ConfigManager {
   cache: Arc<RwLock<HashMap<PathBuf, OverridableConfig>>>,
   js_supported: bool,
   ts_supported: bool,
+  _watcher: RecommendedWatcher,
 }
 
 impl ConfigManager {
@@ -46,12 +49,48 @@ impl ConfigManager {
     };
     let cache: Arc<RwLock<HashMap<PathBuf, OverridableConfig>>> = Arc::new(RwLock::new(HashMap::new()));
 
+    let (tx, rx) = mpsc::channel();
+
+    // 创建文件系统 watcher
+    let mut watcher = RecommendedWatcher::new(
+      move |res: Result<notify::Event, notify::Error>| {
+        if let Ok(event) = res {
+          // 过滤掉不相关的事件，只处理文件修改和创建事件
+          if event.kind.is_modify() || event.kind.is_create() {
+            for path in event.paths {
+              // 异步发送文件变动事件到 channel
+              let _ = tx.send(path);
+            }
+          }
+        }
+      },
+      notify::Config::default().with_poll_interval(Duration::from_secs(1)),
+    )
+    .expect("Failed to create file watcher");
+
+    // 监听 root_dir 的文件变动
+    watcher
+      .watch(&root_dir, RecursiveMode::Recursive)
+      .expect("Failed to watch root directory");
+
+    // 在单独的线程中处理文件变动事件
+    let cache_clone = Arc::clone(&cache);
+    std::thread::spawn(move || {
+      while let Ok(path) = rx.recv() {
+        // 清除缓存中对应的文件
+        let mut cache_write = cache_clone.write().unwrap();
+        cache_write.remove(&path);
+        dbg!("Cache cleared for file:", &path);
+      }
+    });
+
     Self {
       root_config: root_config.root.unwrap_or_default(),
       cache,
       root_dir,
       js_supported,
       ts_supported,
+      _watcher: watcher,
     }
   }
 
@@ -374,5 +413,49 @@ mod test {
     let is_ignored = manager.is_ignored_config_file(&assets_test_ignore_dir);
     dbg!(is_ignored);
     assert!(is_ignored);
+  }
+
+  #[test]
+  fn test_watcher() {
+    use std::fs;
+
+    let current_dir = env!("CARGO_MANIFEST_DIR");
+    let assets_test_watcher_dir = std::path::PathBuf::from(current_dir)
+      .join("assets")
+      .join("test")
+      .join("config")
+      .join("config_manager")
+      .join("watcher_test");
+    let test_config_path = assets_test_watcher_dir.join("novelsaga.config.json");
+    dbg!(&test_config_path);
+    let manager = super::ConfigManager::new(true, true);
+    // 首次加载
+    let result1 = manager.get_override_config(&test_config_path);
+    assert!(result1.is_ok());
+    let config1 = result1.unwrap();
+    dbg!(&config1);
+    assert!(config1.fmt.indent_spaces == 2);
+    // 直接读取cache
+    let result_cached = manager.cache.read().unwrap().get(&test_config_path).cloned();
+    assert!(result_cached.is_some());
+    let cached_config = result_cached.unwrap();
+    dbg!(&cached_config);
+    assert!(cached_config.fmt.indent_spaces == 2);
+    // 修改配置文件
+    fs::write(&test_config_path, r#"{ "fmt": { "indent_spaces": 4 } }"#).expect("Unable to write file");
+    // 等待一段时间以确保 watcher 检测到变化
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    // 再次加载
+    let result2 = manager.get_override_config(&test_config_path);
+    assert!(result2.is_ok());
+    let config2 = result2.unwrap();
+    dbg!(&config2);
+    assert!(config2.fmt.indent_spaces == 4);
+    let result_cached2 = manager.cache.read().unwrap().get(&test_config_path).cloned();
+    assert!(result_cached2.is_some());
+    let cached_config2 = result_cached2.unwrap();
+    assert!(cached_config2.fmt.indent_spaces == 4);
+    // 恢复原始配置文件
+    fs::write(&test_config_path, r#"{ "fmt": { "indent_spaces": 2 } }"#).expect("Unable to write file");
   }
 }
