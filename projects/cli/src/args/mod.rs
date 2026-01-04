@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::LazyLock};
+use std::path::PathBuf;
 
 use clap::Parser;
 use path_absolutize::Absolutize;
@@ -6,19 +6,6 @@ use version_compare::Version;
 use which::which;
 
 const MIN_TS_NODE_VERSION: &str = "23.6";
-
-/// 全局 CLI 参数实例
-pub static GLOBAL_CLI: LazyLock<Cli> = LazyLock::new(|| {
-  let cli_raw = Cli::parse();
-  cli_raw.validate();
-  if let Some(ref paths) = cli_raw.external_plugin_search_path {
-    let abs_paths: Vec<PathBuf> = paths.iter().map(|p| p.absolutize().unwrap().to_path_buf()).collect();
-    let mut cli = cli_raw.clone();
-    cli.external_plugin_search_path = Some(abs_paths);
-    return cli;
-  }
-  cli_raw
-});
 
 #[derive(Parser)]
 #[command(name = "novelsaga_server")]
@@ -28,18 +15,18 @@ pub struct Cli {
   /// Start as LSP server (communicates via stdin/stdout)
   #[arg(long)]
   pub lsp: bool,
-  /// Path to the configuration file
-  #[arg(long, short = 'c')]
-  pub config: Option<PathBuf>,
-  /// Additional plugin search paths
-  #[arg(long, short = 'p')]
-  pub external_plugin_search_path: Option<Vec<PathBuf>>,
   /// Path to the Node.js executable
   #[arg(long)]
   node_path: Option<PathBuf>,
 }
 
 impl Cli {
+  pub fn new() -> Self {
+    let cli = Cli::parse();
+    cli.validate();
+    cli
+  }
+
   /// 获取 node.js 可执行文件路径
   /// 如果参数没有提供，则从主机环境中查找node命令
   /// 最后返回None
@@ -82,16 +69,9 @@ impl Cli {
     }
     false
   }
-}
 
-impl Cli {
   /// 验证并处理命令行参数
   pub fn validate(&self) {
-    if let Some(ref config_path) = self.config
-      && !config_path.try_exists().unwrap_or(false)
-    {
-      eprintln!("Warning: Config file {} does not exist.", config_path.display());
-    }
     // if node_path is provided, judge node.js executable
     if let Some(ref node_path) = self.node_path
       && !node_path.try_exists().unwrap_or(false)

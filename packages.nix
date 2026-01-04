@@ -51,7 +51,7 @@ in {
     };
     cli = default;
 
-    makers-cli-bundle = pkgs.rustPlatform.buildRustPackage {
+    bundle = pkgs.rustPlatform.buildRustPackage {
       pname = "novelsaga-makers";
       version = (lib.importTOML ./Cargo.toml).workspace.package.version;
       src = ./.;
@@ -90,7 +90,7 @@ in {
         export CARGO_NET_OFFLINE=true
         export CLI_OUT_DIR="$TMPDIR/cli-out"
         export WASM_OUT_DIR="$TMPDIR/wasm-out"
-        export ANDROID_OUT_DIR="$TMPDIR/android-out"
+        export SO_OUT_DIR="$TMPDIR/so-out"
         export OUT_DIR="$TMPDIR/out"
         export WASM_PACK_CACHE="$TMPDIR/wasm-pack-cache"
         export WASM_BINDGEN="${wasmBindgenCliDrv}/bin/wasm-bindgen"
@@ -102,7 +102,7 @@ in {
         cargo make --loglevel info \
           --env CLI_OUT_DIR="$CLI_OUT_DIR" \
           --env WASM_OUT_DIR="$WASM_OUT_DIR" \
-          --env ANDROID_OUT_DIR="$ANDROID_OUT_DIR" \
+          --env SO_OUT_DIR="$SO_OUT_DIR" \
           --env OUT_DIR="$OUT_DIR" \
           --env CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
           build-all
@@ -115,10 +115,10 @@ in {
 
         export CLI_OUT_DIR="''${CLI_OUT_DIR:-$TMPDIR/cli-out}"
         export WASM_OUT_DIR="''${WASM_OUT_DIR:-$TMPDIR/wasm-out}"
-        export ANDROID_OUT_DIR="''${ANDROID_OUT_DIR:-$TMPDIR/android-out}"
+        export SO_OUT_DIR="''${SO_OUT_DIR:-$TMPDIR/so-out}"
 
         install_root="$out/share/novelsaga"
-        mkdir -p "$install_root/cli" "$install_root/wasm" "$install_root/android"
+        mkdir -p "$install_root/cli" "$install_root/wasm" "$install_root/so"
 
         if [ -d "$CLI_OUT_DIR" ]; then
           cp -r "$CLI_OUT_DIR"/. "$install_root/cli/"
@@ -128,8 +128,8 @@ in {
           cp -r "$WASM_OUT_DIR"/. "$install_root/wasm/"
         fi
 
-        if [ -d "$ANDROID_OUT_DIR" ]; then
-          cp -r "$ANDROID_OUT_DIR"/. "$install_root/android/"
+        if [ -d "$SO_OUT_DIR" ]; then
+          cp -r "$SO_OUT_DIR"/. "$install_root/so/"
         fi
 
         runHook postInstall

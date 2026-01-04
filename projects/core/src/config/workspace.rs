@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-#[cfg_attr(feature = "wasm", wasm_bindgen::prelude::wasm_bindgen)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorkspaceConfig {
-  #[cfg_attr(feature = "wasm", wasm_bindgen(getter_with_clone))]
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
   pub cache_dir: String,
-  #[cfg_attr(feature = "wasm", wasm_bindgen(getter_with_clone))]
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
   pub novelsaga_dir: String,
 }
 

@@ -1,27 +1,22 @@
 use std::{
   collections::{HashMap, VecDeque},
   path::{Path, PathBuf},
-  sync::{Arc, LazyLock, RwLock, mpsc},
-  time::Duration,
+  sync::Arc,
 };
 
 use config::FileStoredFormat;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use novelsaga_core::config::{
-  CONFIG_FILE_EXTENSIONS_BASE, CONFIG_FILE_EXTENSIONS_EXT_JS, CONFIG_FILE_EXTENSIONS_EXT_TS, CONFIG_FILE_NAMES,
-  IGNORE_CONFIG_FILE_NAMES, NovelSagaConfig, OverridableConfig, RootConfig,
+use parking_lot::RwLock;
+
+use crate::{
+  config::{
+    NovelSagaConfig, OverridableConfig, RootConfig,
+    file_def::{CONFIG_FILE_NAMES, IGNORE_CONFIG_FILE_NAMES, get_base_config_file_extensions},
+    fileformat::NovelSagaFileFormat,
+  },
+  state::feat::Feature,
 };
 
-use crate::args::GLOBAL_CLI;
-
-pub static CONFIG_MANAGER: LazyLock<Arc<RwLock<ConfigManager>>> = LazyLock::new(|| {
-  Arc::new(RwLock::new(ConfigManager::new(
-    GLOBAL_CLI.is_js_supported(),
-    GLOBAL_CLI.is_ts_supported(),
-  )))
-});
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConfigManager {
   // 全局根配置（只加载一次，不可修改）
   root_config: RootConfig,
@@ -29,81 +24,52 @@ pub struct ConfigManager {
   cache: Arc<RwLock<HashMap<PathBuf, OverridableConfig>>>,
   js_supported: bool,
   ts_supported: bool,
-  _watcher: RecommendedWatcher,
 }
 
+#[allow(dead_code)]
 impl ConfigManager {
   /// 初始化配置管理器
   /// 获取root配置
-  /// 缓存所有可覆盖配置
-  pub fn new(js_supported: bool, ts_supported: bool) -> Self {
-    let (root_dir, root_config) = if let Ok(root_config_file) =
-      Self::find_root_config_file(&std::env::current_dir().unwrap(), js_supported, ts_supported)
-    {
-      let root_config = Self::load_root_config_file(&root_config_file, js_supported, ts_supported)
+  ///
+  /// # Panics
+  ///
+  /// 当无法读取配置文件时会 panic
+  #[must_use]
+  pub fn new(feature: Feature) -> Self {
+    let (root_dir, root_config) = if let Ok(root_config_file) = Self::find_root_config_file(
+      &std::env::current_dir().unwrap(),
+      feature.js_support(),
+      feature.ts_support(),
+    ) {
+      let root_config = Self::load_root_config_file(&root_config_file, feature.js_support(), feature.ts_support())
         .expect("Failed to load root config file");
       (root_config_file.parent().unwrap().to_path_buf(), root_config)
     } else {
       // 未找到配置文件，使用默认配置
       (std::env::current_dir().unwrap(), NovelSagaConfig::default())
     };
-    let cache: Arc<RwLock<HashMap<PathBuf, OverridableConfig>>> = Arc::new(RwLock::new(HashMap::new()));
-
-    let (tx, rx) = mpsc::channel();
-
-    // 创建文件系统 watcher
-    let mut watcher = RecommendedWatcher::new(
-      move |res: Result<notify::Event, notify::Error>| {
-        if let Ok(event) = res {
-          // 过滤掉不相关的事件，只处理文件修改和创建事件
-          if event.kind.is_modify() || event.kind.is_create() {
-            for path in event.paths {
-              // 异步发送文件变动事件到 channel
-              let _ = tx.send(path);
-            }
-          }
-        }
-      },
-      notify::Config::default().with_poll_interval(Duration::from_secs(1)),
-    )
-    .expect("Failed to create file watcher");
-
-    // 监听 root_dir 的文件变动
-    watcher
-      .watch(&root_dir, RecursiveMode::Recursive)
-      .expect("Failed to watch root directory");
-
-    // 在单独的线程中处理文件变动事件
-    let cache_clone = Arc::clone(&cache);
-    std::thread::spawn(move || {
-      while let Ok(path) = rx.recv() {
-        // 清除缓存中对应的文件
-        let mut cache_write = cache_clone.write().unwrap();
-        cache_write.remove(&path);
-        dbg!("Cache cleared for file:", &path);
-      }
-    });
 
     Self {
       root_config: root_config.root.unwrap_or_default(),
-      cache,
+      cache: Arc::new(RwLock::new(HashMap::new())),
       root_dir,
-      js_supported,
-      ts_supported,
-      _watcher: watcher,
+      js_supported: feature.js_support(),
+      ts_supported: feature.ts_support(),
     }
   }
 
-  #[allow(dead_code)]
+  #[must_use]
   pub fn get_root_config(&self) -> &RootConfig {
     &self.root_config
   }
 
-  #[allow(dead_code)]
+  /// # Errors
+  ///
+  /// 当无法读取配置文件时会返回错误
   pub fn get_override_config(&self, path: &Path) -> Result<OverridableConfig, config::ConfigError> {
     // 判断缓存中是否存在（只读锁）
     {
-      let cache_read = self.cache.read().unwrap();
+      let cache_read = self.cache.read();
       if let Some(cfg) = cache_read.get(path) {
         return Ok(cfg.clone());
       }
@@ -112,12 +78,16 @@ impl ConfigManager {
     // 加载配置文件
     let cfg = self.load_override_config_file(path)?;
     // 写入缓存（写锁）
-    let mut cache_write = self.cache.write().unwrap();
+    let mut cache_write = self.cache.write();
     cache_write.insert(path.to_path_buf(), cfg.clone());
     Ok(cfg)
   }
 
-  #[allow(dead_code)]
+  pub fn del_override_config_cache(&self, path: &Path) {
+    let mut cache_write = self.cache.write();
+    cache_write.remove(path);
+  }
+
   fn get_config_files_on_every_parent_dirs(&self, start_path: &Path) -> VecDeque<PathBuf> {
     let mut current_path = start_path;
     let mut config_files: VecDeque<PathBuf> = VecDeque::new();
@@ -145,13 +115,11 @@ impl ConfigManager {
   fn is_ignored_config_file(&self, path: &Path) -> bool {
     // time
     let start_time = std::time::Instant::now();
-    let (tx, rx) = std::sync::mpsc::channel();
     let mut binding = ignore::WalkBuilder::new(&self.root_dir);
-    let parallel_walker_builder = binding
+    let walker_builder = binding
       .git_global(false)
       .hidden(false)
       .follow_links(true)
-      .max_depth(Some(64))
       .git_global(false)
       .require_git(false)
       .git_exclude(false)
@@ -166,36 +134,76 @@ impl ConfigManager {
         false,
       );
     for ignore_file_name in IGNORE_CONFIG_FILE_NAMES {
-      parallel_walker_builder.add_custom_ignore_filename(ignore_file_name);
+      walker_builder.add_custom_ignore_filename(ignore_file_name);
     }
-    let walker = parallel_walker_builder.build_parallel();
-    walker.run(|| {
-      let tx = tx.clone();
-      Box::new(move |result| {
+    #[cfg(target_arch = "wasm32")]
+    {
+      let walker = walker_builder.build();
+      for result in walker {
         if let Ok(entry) = result {
           let entry_path = entry.path();
           if entry_path == path {
-            tx.send(true).unwrap();
-            return ignore::WalkState::Quit;
+            return true;
           }
         }
-        ignore::WalkState::Continue
-      })
-    });
-    let elapsed = start_time.elapsed();
-    dbg!(elapsed);
-    // walker returns an entry when the path is visible; invert result so that
-    // true means "ignored" and false means "not ignored"
-    !rx.try_recv().unwrap_or(false)
+      }
+      let elapsed = start_time.elapsed();
+      dbg!(elapsed);
+      false
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+      let (tx, rx) = std::sync::mpsc::channel();
+      let walker = walker_builder.build_parallel();
+      walker.run(|| {
+        let tx = tx.clone();
+        Box::new(move |result| {
+          if let Ok(entry) = result {
+            let entry_path = entry.path();
+            if entry_path == path {
+              tx.send(true).unwrap();
+              return ignore::WalkState::Quit;
+            }
+          }
+          ignore::WalkState::Continue
+        })
+      });
+      let elapsed = start_time.elapsed();
+      dbg!(elapsed);
+      // walker returns an entry when the path is visible; invert result so that
+      // true means "ignored" and false means "not ignored"
+      !rx.try_recv().unwrap_or(false)
+    }
   }
 
   fn load_root_config_file(
     path: &Path,
-    _js_supported: bool,
-    _ts_supported: bool,
+    js_supported: bool,
+    ts_supported: bool,
   ) -> Result<NovelSagaConfig, config::ConfigError> {
-    let config = config::Config::builder().add_source(config::File::from(path)).build()?;
-    config.try_deserialize()
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    if NovelSagaFileFormat::JavaScript.file_extensions().contains(&ext) && js_supported {
+      // JS loader
+      let config = config::Config::builder()
+        .add_source(config::File::new(
+          path.to_str().unwrap(),
+          NovelSagaFileFormat::JavaScript,
+        ))
+        .build()?;
+      config.try_deserialize()
+    } else if NovelSagaFileFormat::TypeScript.file_extensions().contains(&ext) && ts_supported {
+      // TS loader
+      let config = config::Config::builder()
+        .add_source(config::File::new(
+          path.to_str().unwrap(),
+          NovelSagaFileFormat::TypeScript,
+        ))
+        .build()?;
+      config.try_deserialize()
+    } else {
+      let config = config::Config::builder().add_source(config::File::from(path)).build()?;
+      config.try_deserialize()
+    }
   }
 
   fn load_override_config_file(&self, path: &Path) -> Result<OverridableConfig, config::ConfigError> {
@@ -213,7 +221,7 @@ impl ConfigManager {
         Self::find_config_file_in_directory(parent_cfg_path.parent().unwrap(), self.js_supported, self.ts_supported);
       if let Ok(cfg_path) = config_file_result {
         let ext = cfg_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-        if CONFIG_FILE_EXTENSIONS_BASE.contains(&ext) {
+        if get_base_config_file_extensions().contains(&ext) {
           // JSON 等可被 `config` 直接加载的文件
           dbg!(cfg_path.display());
           cfg_builder_parents = cfg_builder_parents.add_source(config::File::from(cfg_path));
@@ -221,18 +229,12 @@ impl ConfigManager {
       }
     }
     dbg!(path.display());
-    let cfg_builder_result = if CONFIG_FILE_EXTENSIONS_BASE.contains(&ext) {
+    let cfg_builder_result = if get_base_config_file_extensions().contains(&ext) {
       // JSON 等可被 `config` 直接加载的文件
       Ok(cfg_builder_parents.add_source(config::File::from(path)))
-    } else if super::fileformat::NovelSagaFileFormat::Markdown
-      .file_extensions()
-      .contains(&ext)
-    {
+    } else if NovelSagaFileFormat::Markdown.file_extensions().contains(&ext) {
       // md loader --- 自定义解析 frontmatter 返回 OverridableConfig
-      Ok(cfg_builder_parents.add_source(config::File::new(
-        path.to_str().unwrap(),
-        super::fileformat::NovelSagaFileFormat::Markdown,
-      )))
+      Ok(cfg_builder_parents.add_source(config::File::new(path.to_str().unwrap(), NovelSagaFileFormat::Markdown)))
     } else {
       Err(config::ConfigError::Message(format!(
         "Unsupported config file extension: {ext}"
@@ -248,7 +250,6 @@ impl ConfigManager {
     }
   }
 
-  #[allow(dead_code)]
   fn load_override_config_dir(path: &Path) -> Result<OverridableConfig, config::ConfigError> {
     let config = config::Config::builder().add_source(config::File::from(path)).build()?;
     config.try_deserialize::<OverridableConfig>()
@@ -259,16 +260,16 @@ impl ConfigManager {
     js_supported: bool,
     ts_supported: bool,
   ) -> Result<PathBuf, std::io::Error> {
-    let config_file_extensions = CONFIG_FILE_EXTENSIONS_BASE
+    let config_file_extensions = get_base_config_file_extensions()
       .iter()
       .copied()
       .chain(if js_supported {
-        CONFIG_FILE_EXTENSIONS_EXT_JS.iter().copied()
+        NovelSagaFileFormat::JavaScript.file_extensions().iter().copied()
       } else {
         [].iter().copied()
       })
       .chain(if ts_supported {
-        CONFIG_FILE_EXTENSIONS_EXT_TS.iter().copied()
+        NovelSagaFileFormat::TypeScript.file_extensions().iter().copied()
       } else {
         [].iter().copied()
       });
@@ -360,6 +361,7 @@ mod test {
   }
   #[test]
   fn test_load_md_config_file() {
+    use crate::state::feat::Feature;
     let current_dir = env!("CARGO_MANIFEST_DIR");
     let assets_test_md_dir = std::path::PathBuf::from(current_dir)
       .join("assets")
@@ -369,7 +371,7 @@ mod test {
       .join("sub");
     let assets_test_md = assets_test_md_dir.clone().join("test.md");
     dbg!(&assets_test_md);
-    let manager = super::ConfigManager::new(true, true);
+    let manager = super::ConfigManager::new(Feature::new(true, true));
     let result = manager.load_override_config_file(&assets_test_md);
     if let Err(e) = &result {
       eprintln!("Error loading config: {e}");
@@ -399,6 +401,7 @@ mod test {
 
   #[test]
   fn test_is_ignored_config_file() {
+    use crate::state::feat::Feature;
     let current_dir = env!("CARGO_MANIFEST_DIR");
     let assets_test_ignore_dir = std::path::PathBuf::from(current_dir)
       .join("assets")
@@ -409,7 +412,7 @@ mod test {
       .join("sub")
       .join("test-ignore.md");
     dbg!(&assets_test_ignore_dir);
-    let manager = super::ConfigManager::new(true, true);
+    let manager = super::ConfigManager::new(Feature::new(true, true));
     let is_ignored = manager.is_ignored_config_file(&assets_test_ignore_dir);
     dbg!(is_ignored);
     assert!(is_ignored);
@@ -418,6 +421,8 @@ mod test {
   #[test]
   fn test_watcher() {
     use std::fs;
+
+    use crate::state::feat::Feature;
 
     let current_dir = env!("CARGO_MANIFEST_DIR");
     let assets_test_watcher_dir = std::path::PathBuf::from(current_dir)
@@ -428,7 +433,7 @@ mod test {
       .join("watcher_test");
     let test_config_path = assets_test_watcher_dir.join("novelsaga.config.json");
     dbg!(&test_config_path);
-    let manager = super::ConfigManager::new(true, true);
+    let manager = super::ConfigManager::new(Feature::new(true, true));
     // 首次加载
     let result1 = manager.get_override_config(&test_config_path);
     assert!(result1.is_ok());
@@ -436,14 +441,16 @@ mod test {
     dbg!(&config1);
     assert!(config1.fmt.indent_spaces == 2);
     // 直接读取cache
-    let result_cached = manager.cache.read().unwrap().get(&test_config_path).cloned();
+    let result_cached = manager.cache.read().get(&test_config_path).cloned();
     assert!(result_cached.is_some());
     let cached_config = result_cached.unwrap();
     dbg!(&cached_config);
     assert!(cached_config.fmt.indent_spaces == 2);
     // 修改配置文件
     fs::write(&test_config_path, r#"{ "fmt": { "indent_spaces": 4 } }"#).expect("Unable to write file");
-    // 等待一段时间以确保 watcher 检测到变化
+    // 删除缓存
+    manager.del_override_config_cache(&test_config_path);
+    // 等待一段时间以确保成功删除
     std::thread::sleep(std::time::Duration::from_secs(3));
     // 再次加载
     let result2 = manager.get_override_config(&test_config_path);
@@ -451,7 +458,7 @@ mod test {
     let config2 = result2.unwrap();
     dbg!(&config2);
     assert!(config2.fmt.indent_spaces == 4);
-    let result_cached2 = manager.cache.read().unwrap().get(&test_config_path).cloned();
+    let result_cached2 = manager.cache.read().get(&test_config_path).cloned();
     assert!(result_cached2.is_some());
     let cached_config2 = result_cached2.unwrap();
     assert!(cached_config2.fmt.indent_spaces == 4);

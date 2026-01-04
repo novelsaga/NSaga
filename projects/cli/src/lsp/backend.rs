@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path, sync::Arc};
 
-use novelsaga_core::config::OverridableConfig;
+use novelsaga_core::{article::Article, config::OverridableConfig, library, state::init::Initializer};
 use tokio::sync::RwLock;
 use tower_lsp::{
   Client, LanguageServer,
@@ -11,8 +11,6 @@ use tower_lsp::{
     ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
   },
 };
-
-use crate::{config::manager::CONFIG_MANAGER, core::formatter};
 
 #[derive(Debug)]
 pub struct Backend {
@@ -103,11 +101,17 @@ impl LanguageServer for Backend {
   async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
     eprintln!("Formatting requested for {:?}", params.text_document.uri);
 
-    // 使用全局配置加载器获取配置（在短作用域内获取并释放锁，避免在持有 std::sync::RwLockGuard 时 .await）
+    // 使用全局配置加载器获取配置
     let (config, maybe_err) = {
-      let res = CONFIG_MANAGER
-        .read()
-        .unwrap()
+      let state = match Initializer::get() {
+        Ok(s) => s,
+        Err(e) => {
+          dbg!("Failed to get global state for formatting:", e);
+          return Ok(None);
+        }
+      };
+      let res = state
+        .config_manager()
         .get_override_config(Path::new(params.text_document.uri.as_str()));
       match res {
         Ok(cfg) => (Some(cfg), None),
@@ -135,7 +139,11 @@ impl LanguageServer for Backend {
     };
 
     // 使用 pangu 格式化文本(在中英文之间添加空格)
-    let formatted = formatter(&config.as_ref().unwrap_or(&OverridableConfig::default()).fmt, content);
+    // let formatted = formatter(&config.as_ref().unwrap_or(&OverridableConfig::default()).fmt, content);
+    let formatted = library::formatter::format_text(
+      &Article::new(content),
+      &config.as_ref().unwrap_or(&OverridableConfig::default()).fmt,
+    );
 
     // 计算文档的结束位置
     let line_count = u32::try_from(content.lines().count()).unwrap_or(0);
@@ -151,7 +159,7 @@ impl LanguageServer for Backend {
           character: last_char,
         },
       },
-      new_text: formatted,
+      new_text: formatted.content_ref().to_string(),
     }]))
   }
 }

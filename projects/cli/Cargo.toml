@@ -17,22 +17,8 @@
     "unicode",
     "derive",
   ] }
-  config = { version = "0.15.19", features = [
-    "toml",
-    "yaml",
-    "json",
-    "json5",
-    "ron",
-    "corn",
-  ] }
-  directories = "^6.0"
   either = "1.9"
-  gray_matter = { version = "0.3.2", features = ["yaml"] }
-  ignore = "0.4.25"
-  merge-struct = "0.1.0"
-  notify = { version = "8.1.0", features = ["serde"] }
   novelsaga-core = { path = "../core" }
-  num_cpus = "1.17.0"
   path-absolutize = "^3.1"
   rusty_nodejs_repl = { version = "0.2.2", features = ["integration_utils"] }
   serde = { version = "1.0", features = ["derive"] }

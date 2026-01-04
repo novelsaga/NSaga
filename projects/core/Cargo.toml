@@ -3,17 +3,43 @@
   name              = "novelsaga-core"
   version.workspace = true
 
+  [package.metadata.wasm-pack.profile.release]
+    wasm-opt = false
+
 [lib]
-  crate-type = ["rlib"]
+  crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+  config = { version = "0.15.19", features = [
+    "toml",
+    "yaml",
+    "json",
+    "json5",
+    "ron",
+    "corn",
+    "ini",
+  ] }
+  derive-new = "0.7"
+  derive_builder = "0.20"
+  getset = "0.1"
+  gray_matter = { version = "0.3.2", features = ["yaml"] }
+  ignore = "0.4.25"
   merge-struct = "0.1.0"
-  pangu        = "0.3.0"
-  serde        = { version = "1.0", features = ["derive"] }
-  wasm-bindgen = { version = "0.2", optional = true }
+  pangu = "0.3.0"
+  parking_lot = "0.12"
+  safer-ffi = { version = "0.1.13", optional = true }
+  serde = { version = "1.0", features = ["derive"] }
+  serde_json = "1.0"
+  static_assertions = "1.1"
 
 [features]
-  wasm = ["dep:wasm-bindgen"]
+  ffi     = ["safer-ffi/headers"]
+  headers = ["ffi"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+  console_error_panic_hook = "0.1"
+  wasm-bindgen             = "0.2"
+  wee_alloc                = "0.4"
 
 [lints]
   workspace = true

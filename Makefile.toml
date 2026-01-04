@@ -3,44 +3,43 @@
   skip_core_tasks      = true
 
 [env]
-  ANDROID_ABI                          = "arm64-v8a"
-  ANDROID_OUT_DIR                      = "out/android"
-  ANDROID_PROJECT_DIR                  = "projects/android"
-  ANDROID_TARGET                       = "aarch64-linux-android"
   CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
   CHANGELOG_FILE                       = "CHANGELOG.md"
   CLI_OUT_DIR                          = "out/cli"
   CLI_PROJECT_DIR                      = "projects/cli"
+  CORE_PROJECT_DIR                     = "projects/core"
   OUT_DIR                              = "out"
+  SO_OUT_DIR                           = "out/so"
   WASM_OUT_DIR                         = "out/wasm"
-  WASM_PROJECT_DIR                     = "projects/wasm"
 
-  # Cross toolchains (mirrors flake.nix env for consistency)
-  AR_aarch64_linux_android       = "aarch64-unknown-linux-android-ar"
-  AR_aarch64_pc_windows_gnullvm  = "aarch64-w64-mingw32-ar"
-  AR_aarch64_unknown_linux_gnu   = "aarch64-unknown-linux-gnu-ar"
-  AR_x86_64_pc_windows_gnu       = "x86_64-w64-mingw32-ar"
-  AR_x86_64_unknown_linux_gnu    = "ar"
-  CC_aarch64_linux_android       = "aarch64-unknown-linux-android-clang"
-  CC_aarch64_pc_windows_gnullvm  = "aarch64-w64-mingw32-clang"
-  CC_aarch64_unknown_linux_gnu   = "aarch64-unknown-linux-gnu-gcc"
-  CC_x86_64_pc_windows_gnu       = "x86_64-w64-mingw32-gcc"
-  CC_x86_64_unknown_linux_gnu    = "gcc"
-  CXX_aarch64_linux_android      = "aarch64-unknown-linux-android-clang++"
-  CXX_aarch64_pc_windows_gnullvm = "aarch64-w64-mingw32-clang++"
-  CXX_aarch64_unknown_linux_gnu  = "aarch64-unknown-linux-gnu-g++"
-  CXX_x86_64_pc_windows_gnu      = "x86_64-w64-mingw32-g++"
-  CXX_x86_64_unknown_linux_gnu   = "g++"
+  # Cross toolchains (must match flake.nix env)
+  AR_aarch64_linux_android                  = "aarch64-unknown-linux-android-ar"
+  AR_aarch64_pc_windows_gnullvm             = "aarch64-w64-mingw32-ar"
+  AR_aarch64_unknown_linux_gnu              = "aarch64-unknown-linux-gnu-ar"
+  AR_x86_64_pc_windows_gnu                  = "x86_64-w64-mingw32-ar"
+  AR_x86_64_unknown_linux_gnu               = "ar"
+  CARGO_TARGET_AARCH64_LINUX_ANDROID_AR     = "aarch64-unknown-linux-android-ar"
+  CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "aarch64-unknown-linux-android-clang"
+  CC_aarch64_linux_android                  = "aarch64-unknown-linux-android-clang"
+  CC_aarch64_pc_windows_gnullvm             = "aarch64-w64-mingw32-clang"
+  CC_aarch64_unknown_linux_gnu              = "aarch64-unknown-linux-gnu-gcc"
+  CC_x86_64_pc_windows_gnu                  = "x86_64-w64-mingw32-gcc"
+  CC_x86_64_unknown_linux_gnu               = "gcc"
+  CXX_aarch64_linux_android                 = "aarch64-unknown-linux-android-clang++"
+  CXX_aarch64_pc_windows_gnullvm            = "aarch64-w64-mingw32-clang++"
+  CXX_aarch64_unknown_linux_gnu             = "aarch64-unknown-linux-gnu-g++"
+  CXX_x86_64_pc_windows_gnu                 = "x86_64-w64-mingw32-g++"
+  CXX_x86_64_unknown_linux_gnu              = "g++"
 
   # ==================== WASM 构建 ====================
 
 [tasks.wasm]
-  description = "Build and optimize WASM package"
+  description = "Build WASM package from core"
   script = '''
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "🔨 Building NovelSaga WASM..."
+echo "🔨 Building NovelSaga WASM from core..."
 
 WASM_OUT_DIR_REAL="$(realpath -m "${WASM_OUT_DIR}")"
 
@@ -55,81 +54,166 @@ rm -rf "${WASM_OUT_DIR_REAL}"
 mkdir -p "${WASM_OUT_DIR_REAL}"
 
 # 构建
-echo "📦 Building with wasm-pack (no-install)..."
-pushd "${WASM_PROJECT_DIR}" >/dev/null
-WASM_BINDGEN="${WASM_BINDGEN:-$(command -v wasm-bindgen || true)}" \
-  wasm-pack build --mode no-install --target web --release --out-dir "${WASM_OUT_DIR_REAL}"
-popd >/dev/null
-
-# 使用 wasm-opt 进一步优化(如果可用)
-if command -v wasm-opt &> /dev/null; then
-    echo ""
-    echo "🔧 Optimizing with wasm-opt..."
-  wasm-opt -Oz --enable-bulk-memory "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm" -o "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm.opt"
-  mv "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm.opt" "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm"
-    echo "✅ Optimization complete!"
-else
-    echo "⚠️  wasm-opt not found, skipping additional optimization"
-fi
+echo "📦 Building with wasm-pack..."
+wasm-pack build "${CORE_PROJECT_DIR}" --target web --release --out-dir "${WASM_OUT_DIR_REAL}"
 
 echo ""
 echo "✅ Build complete!"
 echo "📊 Package size:"
-du -h "${WASM_OUT_DIR_REAL}/novelsaga_wasm_bg.wasm"
+du -h "${WASM_OUT_DIR_REAL}/novelsaga_core_bg.wasm"
+echo ""
+echo "🚀 WASM package ready at: ${WASM_OUT_DIR}"
 '''
 
-  # ==================== Android 构建 ====================
+  # ==================== 动态库 (SO/DLL/DYLIB) 构建 ====================
 
-[tasks.android]
-  description = "Build Android library (aarch64 only)"
+[tasks.so]
+  description = "Build Shared Library (.so/.dll/.dylib) for a single target"
   script = '''
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "🤖 Building NovelSaga Android..."
+# 从环境变量获取目标，如果未设置则根据当前系统推断
+if [ -z "${SO_TARGET:-}" ]; then
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64)
+            SO_TARGET="linux-x64"
+            ;;
+        Linux-aarch64)
+            SO_TARGET="linux-arm64"
+            ;;
+        Darwin-x86_64)
+            SO_TARGET="macos-x64"
+            ;;
+        Darwin-arm64)
+            SO_TARGET="macos-arm64"
+            ;;
+        *)
+            echo "❌ Unsupported platform: $(uname -s)-$(uname -m)"
+            exit 1
+            ;;
+    esac
+fi
 
-# 清理并创建输出目录
-ANDROID_OUT_DIR_REAL="$(realpath -m "${ANDROID_OUT_DIR}")"
-rm -rf "${ANDROID_OUT_DIR_REAL}"
-mkdir -p "${ANDROID_OUT_DIR_REAL}/jniLibs/${ANDROID_ABI}"
+echo "🚀 Building NovelSaga Shared Library for $SO_TARGET..."
 
-echo ""
-echo "🔨 Building for ${ANDROID_TARGET}..."
-cd "${ANDROID_PROJECT_DIR}"
+# 目标映射与文件名处理
+case "$SO_TARGET" in
+    macos-arm64)
+        CARGO_TARGET="aarch64-apple-darwin"
+        LIB_NAME="libnovelsaga_core.dylib"
+        ;;
+    macos-x64)
+        CARGO_TARGET="x86_64-apple-darwin"
+        LIB_NAME="libnovelsaga_core.dylib"
+        ;;
+    windows-arm64)
+        CARGO_TARGET="aarch64-pc-windows-gnullvm"
+        LIB_NAME="novelsaga_core.dll"
+        ;;
+    windows-x64)
+        CARGO_TARGET="x86_64-pc-windows-gnu"
+        LIB_NAME="novelsaga_core.dll"
+        ;;
+    linux-arm64)
+        CARGO_TARGET="aarch64-unknown-linux-gnu"
+        LIB_NAME="libnovelsaga_core.so"
+        ;;
+    linux-x64)
+        CARGO_TARGET="x86_64-unknown-linux-gnu"
+        LIB_NAME="libnovelsaga_core.so"
+        ;;
+    android-arm64)
+        CARGO_TARGET="aarch64-linux-android"
+        LIB_NAME="libnovelsaga_core.so"
+        ;;
+    *)
+        echo "❌ Unknown target: $SO_TARGET"
+        echo "Available targets: macos-arm64, macos-x64, windows-arm64, windows-x64, linux-arm64, linux-x64, android-arm64"
+        exit 1
+        ;;
+esac
+
+SO_OUT_DIR_REAL="$(realpath -m "${SO_OUT_DIR}/$SO_TARGET")"
+CORE_PROJECT_DIR_REAL="$(realpath -m "${CORE_PROJECT_DIR}")"
+
+# 创建输出目录
+rm -rf "${SO_OUT_DIR_REAL}"
+mkdir -p "${SO_OUT_DIR_REAL}/include"
+
+cd "${CORE_PROJECT_DIR_REAL}"
 
 TARGET_DIR_REAL="$(realpath -m "${CARGO_TARGET_DIR:-../../target}")"
 
-ANDROID_TRIPLE_ALT="aarch64-unknown-linux-android"
-ANDROID_CLANG="${ANDROID_CLANG:-${CC_aarch64_linux_android:-$(command -v ${ANDROID_TRIPLE_ALT}-clang || command -v aarch64-linux-android-clang || true)}}"
-ANDROID_AR="${ANDROID_AR:-${AR_aarch64_linux_android:-$(command -v ${ANDROID_TRIPLE_ALT}-ar || command -v aarch64-linux-android-ar || true)}}"
+echo "🔨 Building for $CARGO_TARGET..."
 
-if [ -z "${ANDROID_CLANG}" ] || [ -z "${ANDROID_AR}" ]; then
-  echo "❌ Android NDK toolchain not found (aarch64-linux-android-clang/ar)"
-  exit 1
+# 构建动态库
+cargo zigbuild --release --target "$CARGO_TARGET" --features ffi --target-dir "${TARGET_DIR_REAL}"
+
+# 生成 safer-ffi C 头文件
+echo "📄 Generating C header with safer-ffi..."
+cargo run -p novelsaga-core --features headers --bin generate-headers
+
+# 移动头文件到输出目录
+if [ -f "novelsaga_core.h" ]; then
+    mv "novelsaga_core.h" "${SO_OUT_DIR_REAL}/include/"
+    echo "✅ Header generated: ${SO_OUT_DIR}/$SO_TARGET/include/novelsaga_core.h"
+else
+    echo "❌ Header file not found!"
+    exit 1
 fi
 
-export CC_aarch64_linux_android="${ANDROID_CLANG}"
-export CXX_aarch64_linux_android="${ANDROID_CLANG}++"
-export AR_aarch64_linux_android="${ANDROID_AR}"
-export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${ANDROID_CLANG}"
-export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="${ANDROID_AR}"
-
-cargo build --target "${ANDROID_TARGET}" --release --target-dir "${TARGET_DIR_REAL}"
-
-# 复制到输出目录
-cp "${TARGET_DIR_REAL}/${ANDROID_TARGET}/release/libnovelsaga_android.so" "${ANDROID_OUT_DIR_REAL}/jniLibs/${ANDROID_ABI}/"
+# 复制生成的库文件
+LIB_FILE="${TARGET_DIR_REAL}/$CARGO_TARGET/release/$LIB_NAME"
+if [ -f "$LIB_FILE" ]; then
+    cp "$LIB_FILE" "${SO_OUT_DIR_REAL}/"
+    echo "✅ Build complete!"
+    echo "📊 Library size:"
+    du -h "${SO_OUT_DIR_REAL}/$LIB_NAME"
+    echo ""
+    echo "🚀 Library ready at: ${SO_OUT_DIR}/$SO_TARGET/"
+else
+    echo "❌ Failed to find library file at: $LIB_FILE"
+    exit 1
+fi
 
 cd ../..
-echo "✅ ${ANDROID_TARGET} -> ${ANDROID_OUT_DIR}/jniLibs/${ANDROID_ABI}/libnovelsaga_android.so"
+'''
+
+[tasks.so-all]
+  description = "Build Shared Library for all 7 platforms"
+  script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "🚀 Building NovelSaga Shared Library for all platforms..."
+
+# 清理输出目录
+rm -rf "${SO_OUT_DIR}"
+mkdir -p "${SO_OUT_DIR}"
+
+# 所有目标平台
+TARGETS=("macos-arm64" "macos-x64" "windows-arm64" "windows-x64" "linux-arm64" "linux-x64" "android-arm64")
+
+# 循环构建每个平台
+for target in "${TARGETS[@]}"; do
+    echo ""
+    echo "════════════════════════════════════════"
+    cargo make --env SO_TARGET="$target" \
+               --env SO_OUT_DIR="${SO_OUT_DIR}" \
+               so
+done
 
 echo ""
-echo "✅ Android build complete!"
-echo "📊 Library size:"
-du -h "${ANDROID_OUT_DIR}/jniLibs/${ANDROID_ABI}/libnovelsaga_android.so"
+echo "════════════════════════════════════════"
+echo "✅ All platforms built successfully!"
+echo ""
+echo "📊 Library sizes:"
+find "${SO_OUT_DIR}" -type f \( -name "*.so" -o -name "*.dll" -o -name "*.dylib" \) -exec du -h {} \;
 
 echo ""
-echo "🚀 Ready to integrate with Android project!"
-echo "   Copy ${ANDROID_OUT_DIR}/jniLibs/ to your Android app's src/main/jniLibs/"
+echo "📁 Output structure:"
+find "${SO_OUT_DIR}" -maxdepth 2 -not -path '*/.*'
 '''
 
   # ==================== CLI 跨平台构建 ====================
@@ -190,9 +274,13 @@ case "$CLI_TARGET" in
         CARGO_TARGET="x86_64-unknown-linux-gnu"
         BINARY_NAME="novelsaga"
         ;;
+    android-arm64)
+        CARGO_TARGET="aarch64-linux-android"
+        BINARY_NAME="novelsaga"
+        ;;
     *)
         echo "❌ Unknown target: $CLI_TARGET"
-        echo "Available targets: macos-arm64, macos-x64, windows-arm64, windows-x64, linux-arm64, linux-x64"
+        echo "Available targets: macos-arm64, macos-x64, windows-arm64, windows-x64, linux-arm64, linux-x64, android-arm64"
         exit 1
         ;;
 esac
@@ -245,7 +333,7 @@ echo "🚀 Building NovelSaga CLI for all platforms..."
 rm -rf "${CLI_OUT_DIR}"
 mkdir -p "${CLI_OUT_DIR}"
 
-# 所有目标平台
+# 所有目标平台（移除 android-arm64，改用 .so）
 TARGETS=("macos-arm64" "macos-x64" "windows-arm64" "windows-x64" "linux-arm64" "linux-x64")
 
 # 循环构建每个平台
@@ -254,7 +342,6 @@ for target in "${TARGETS[@]}"; do
     echo "════════════════════════════════════════"
     cargo make --env CLI_TARGET="$target" \
                --env CLI_OUT_DIR="${CLI_OUT_DIR}" \
-               --env CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-}" \
                cli
 done
 
@@ -286,11 +373,11 @@ rm -rf "${WASM_OUT_DIR}"
 echo "✅ WASM artifacts cleaned"
 '''
 
-[tasks.clean-android]
-  description = "Clean Android build artifacts"
+[tasks.clean-so]
+  description = "Clean Shared Library build artifacts"
   script = '''
-rm -rf "${ANDROID_OUT_DIR}"
-echo "✅ Android artifacts cleaned"
+rm -rf "${SO_OUT_DIR}"
+echo "✅ Shared Library artifacts cleaned"
 '''
 
 [tasks.clean-cli]
@@ -301,7 +388,7 @@ echo "✅ CLI artifacts cleaned"
 '''
 
 [tasks.clean-all]
-  dependencies = ["clean-wasm", "clean-android", "clean-cli"]
+  dependencies = ["clean-wasm", "clean-so", "clean-cli"]
   description = "Clean all build artifacts"
   script = '''
 cargo clean
@@ -334,8 +421,8 @@ git-cliff --config cliff.toml --unreleased
   # ==================== 组合任务 ====================
 
 [tasks.build-all]
-  dependencies = ["wasm", "android", "cli-all"]
-  description  = "Build WASM, Android and CLI for all platforms"
+  dependencies = ["wasm", "so-all", "cli-all"]
+  description  = "Build WASM, Shared Libraries, and CLI for all platforms"
 
 [tasks.default]
   description = "Show available tasks"
@@ -343,22 +430,28 @@ git-cliff --config cliff.toml --unreleased
 echo "📋 Available tasks:"
 echo ""
 echo "  WASM:"
-echo "    makers wasm          - Build and optimize WASM"
+echo "    makers wasm          - Build WASM from core"
 echo ""
-echo "  Android:"
-echo "    makers android       - Build Android lib (aarch64 only)"
+echo "  Shared Library (FFI):"
+echo "    makers so            - Build Shared Library (.so/.dll/.dylib) for current platform"
+echo "                           (or specify: makers so --env SO_TARGET=windows-x64)"
+echo "    makers so-all        - Build Shared Library for all 7 platforms"
 echo ""
 echo "  CLI:"
 echo "    makers cli           - Build CLI for current platform"
 echo "                           (or specify: makers cli --env CLI_TARGET=linux-x64)"
-echo "    makers cli-all       - Build CLI for all 6 platforms (using zigbuild)"
+echo "    makers cli-all       - Build CLI for all 6 platforms (excluding Android)"
 echo ""
 echo "  Other:"
-echo "    makers build-all     - Build WASM, Android and CLI for all platforms"
+echo "    makers build-all     - Build WASM, Shared Libraries, and CLI for all platforms"
 echo "    makers clean-all     - Clean all artifacts"
 echo ""
 echo "  Changelog:"
 echo "    makers changelog           - Generate or update ${CHANGELOG_FILE} via git-cliff"
 echo "    makers changelog-preview   - Show unreleased entries"
+echo ""
+echo "  Available targets (SO/CLI):"
+echo "    macos-arm64, macos-x64, windows-arm64, windows-x64,"
+echo "    linux-arm64, linux-x64, android-arm64 (SO only)"
 echo ""
 '''
