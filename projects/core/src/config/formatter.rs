@@ -1,14 +1,10 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// 格式化配置
-/// 用于测试config用
-///
-/// **导出目标**: WASM, SO
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
-#[cfg_attr(feature = "ffi", safer_ffi::derive_ReprC)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "_config.ts")]
 #[serde(default)]
-#[repr(C)]
 pub struct FormatConfig {
   pub indent_spaces: usize,
   pub blank_lines_between_paragraphs: usize,

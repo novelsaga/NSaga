@@ -1,25 +1,5 @@
 {pkgs, ...}: let
   inherit (pkgs) lib;
-  cargoLock = lib.importTOML ./Cargo.lock;
-  wasmBindgenPkg = lib.findFirst (p: p.name == "wasm-bindgen") {version = "0.0";} cargoLock.package;
-  wasmBindgenVersion = wasmBindgenPkg.version;
-  wasmBindgenHashes = {
-    # Add entries if the lock bumps wasm-bindgen.
-    "0.2.106" = {
-      crateSha256 = "13pv613cxx57pyfw9z1q7rdi3vkjdqdahnvnlilf7bn4bqdax99k";
-      cargoHash = "sha256-ElDatyOwdKwHg3bNH/1pcxKI7LXkhsotlDPQjiLHBwA=";
-    };
-  };
-  wasmBindgenSelected = wasmBindgenHashes.${wasmBindgenVersion} or (throw "wasm-bindgen version ${wasmBindgenVersion} not mapped; please add sha256/cargoHash");
-  wasmBindgenCliDrv = pkgs.rustPlatform.buildRustPackage rec {
-    pname = "wasm-bindgen-cli";
-    version = wasmBindgenVersion;
-    src = pkgs.fetchCrate {
-      inherit pname version;
-      sha256 = wasmBindgenSelected.crateSha256;
-    };
-    cargoHash = wasmBindgenSelected.cargoHash;
-  };
   rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
     targets = [
       "x86_64-unknown-linux-gnu"
@@ -52,7 +32,7 @@ in {
     cli = default;
 
     bundle = pkgs.rustPlatform.buildRustPackage {
-      pname = "novelsaga-makers";
+      pname = "novelsaga-bundle";
       version = (lib.importTOML ./Cargo.toml).workspace.package.version;
       src = ./.;
       cargoLock = {
@@ -67,15 +47,11 @@ in {
 
       nativeBuildInputs = [
         rustToolchain
-        pkgs.cargo-make
         pkgs.cargo-zigbuild
         pkgs.pkgsCross.ucrt64.stdenv.cc
         pkgs.pkgsCross.ucrtAarch64.stdenv.cc
         pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc
         pkgs.pkgsCross.aarch64-android-prebuilt.stdenv.cc
-        pkgs.wasm-pack
-        pkgs.binaryen
-        wasmBindgenCliDrv
         pkgs.zig
       ];
 
@@ -92,20 +68,34 @@ in {
         export WASM_OUT_DIR="$TMPDIR/wasm-out"
         export SO_OUT_DIR="$TMPDIR/so-out"
         export OUT_DIR="$TMPDIR/out"
-        export WASM_PACK_CACHE="$TMPDIR/wasm-pack-cache"
-        export WASM_BINDGEN="${wasmBindgenCliDrv}/bin/wasm-bindgen"
 
-        # Nix sandboxes lack /usr/bin/env; rewrite task shebangs to an absolute bash path.
-        substituteInPlace Makefile.toml --replace-warn '#!/usr/bin/env bash' '#!${pkgs.bash}/bin/bash'
+        # Cross-compilation environment variables
+        export CC_x86_64_unknown_linux_gnu="gcc"
+        export CXX_x86_64_unknown_linux_gnu="g++"
+        export AR_x86_64_unknown_linux_gnu="ar"
+        export CC_aarch64_unknown_linux_gnu="aarch64-unknown-linux-gnu-gcc"
+        export CXX_aarch64_unknown_linux_gnu="aarch64-unknown-linux-gnu-g++"
+        export AR_aarch64_unknown_linux_gnu="aarch64-unknown-linux-gnu-ar"
+        export CC_x86_64_pc_windows_gnu="x86_64-w64-mingw32-gcc"
+        export CXX_x86_64_pc_windows_gnu="x86_64-w64-mingw32-g++"
+        export AR_x86_64_pc_windows_gnu="x86_64-w64-mingw32-ar"
+        export CC_aarch64_pc_windows_gnullvm="aarch64-w64-mingw32-clang"
+        export CXX_aarch64_pc_windows_gnullvm="aarch64-w64-mingw32-clang++"
+        export AR_aarch64_pc_windows_gnullvm="aarch64-w64-mingw32-ar"
+        export CC_aarch64_linux_android="aarch64-unknown-linux-android-clang"
+        export CXX_aarch64_linux_android="aarch64-unknown-linux-android-clang++"
+        export AR_aarch64_linux_android="aarch64-unknown-linux-android-ar"
+        export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="aarch64-unknown-linux-android-clang"
+        export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="aarch64-unknown-linux-android-ar"
 
-        # Build all targets defined in Makefile (uses cargo-zigbuild per target).
-        cargo make --loglevel info \
-          --env CLI_OUT_DIR="$CLI_OUT_DIR" \
-          --env WASM_OUT_DIR="$WASM_OUT_DIR" \
-          --env SO_OUT_DIR="$SO_OUT_DIR" \
-          --env OUT_DIR="$OUT_DIR" \
-          --env CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
-          build-all
+        # Android NDK sysroot configuration
+        ANDROID_CC="${pkgs.pkgsCross.aarch64-android-prebuilt.stdenv.cc}"
+        if [ -d "$ANDROID_CC/ndk-bundle" ]; then
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C link-arg=--sysroot=$ANDROID_CC/ndk-bundle/sysroot"
+        fi
+
+        # Build all targets using xtask
+        cargo run -p xtask --release -- build-all
 
         runHook postBuild
       '';
@@ -139,7 +129,7 @@ in {
 
       meta = with lib; {
         license = licenses.lgpl3Only;
-        description = "NovelSaga multi-target CLI bundle built via cargo-make";
+        description = "NovelSaga multi-target bundle built via xtask";
       };
     };
   };

@@ -7,6 +7,8 @@ use which::which;
 
 const MIN_TS_NODE_VERSION: &str = "23.6";
 
+const MIN_JS_NODE_VERSION: &str = "13.2.0";
+
 #[derive(Parser)]
 #[command(name = "novelsaga_server")]
 #[command(about = "NovelSaga Language Server", long_about = None)]

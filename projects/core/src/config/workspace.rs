@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "_config.ts")]
 #[serde(default)]
 pub struct WorkspaceConfig {
-  #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
   pub cache_dir: String,
-  #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
   pub novelsaga_dir: String,
 }
 

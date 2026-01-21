@@ -12,7 +12,7 @@ async fn main() {
   // 访问全局 CLI，触发解析和配置加载
   let cli = Cli::new();
   cli.validate();
-  let feature = Feature::new(cli.is_ts_supported(), cli.is_js_supported());
+  let feature = Feature::new(None, None);
   Initializer::init(feature).expect("Failed to initialize");
 
   if cli.lsp {

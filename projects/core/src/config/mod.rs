@@ -6,24 +6,23 @@ pub mod workspace;
 
 use merge_struct::merge;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 pub trait Config {}
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "_config.ts")]
 #[serde(default)]
 pub struct OverridableConfig {
-  #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
   pub fmt: formatter::FormatConfig,
 }
 
 impl Config for OverridableConfig {}
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
+#[ts(export, export_to = "_config.ts")]
 #[serde(default)]
 pub struct RootConfig {
-  #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
   pub workspace: Option<workspace::WorkspaceConfig>,
 }
 
@@ -31,7 +30,7 @@ impl RootConfig {
   #[must_use]
   pub fn to_novelsaga_config(&self) -> NovelSagaConfig {
     NovelSagaConfig {
-      root: Some(self.clone()),
+      root: self.clone(),
       overridable: OverridableConfig::default(),
     }
   }
@@ -39,16 +38,14 @@ impl RootConfig {
 
 impl Config for RootConfig {}
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "_config.ts", rename = "_NovelSagaConfig")]
 #[serde(default)]
 pub struct NovelSagaConfig {
   #[serde(flatten)]
-  #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
-  pub root: Option<RootConfig>,
+  pub root: RootConfig,
 
   #[serde(flatten)]
-  #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
   pub overridable: OverridableConfig,
 }
 
@@ -56,7 +53,7 @@ impl NovelSagaConfig {
   #[must_use]
   pub fn from_root_and_override(root: Option<RootConfig>, overridable: Option<OverridableConfig>) -> Self {
     Self {
-      root,
+      root: root.unwrap_or_default(),
       overridable: overridable.unwrap_or_default(),
     }
   }
@@ -76,3 +73,17 @@ impl NovelSagaConfig {
 }
 
 impl Config for NovelSagaConfig {}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn export_bindings() {
+    formatter::FormatConfig::export().expect("failed to export FormatConfig");
+    workspace::WorkspaceConfig::export().expect("failed to export WorkspaceConfig");
+    RootConfig::export().expect("failed to export RootConfig");
+    OverridableConfig::export().expect("failed to export OverridableConfig");
+    NovelSagaConfig::export().expect("failed to export NovelSagaConfig");
+  }
+}

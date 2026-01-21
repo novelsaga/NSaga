@@ -8,6 +8,7 @@
 in {
   "rust-analyzer.server.path" = "${devenvRootPathBin}/rust-analyzer";
   "rust-analyzer.check.command" = "clippy";
+  "rust-analyzer.rustc.source" = "discover";
   "rust-analyzer.check.extraArgs" = [
     # "--all-features"
   ];

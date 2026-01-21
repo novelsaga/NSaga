@@ -1,0 +1,5 @@
+packages:
+  - projects/cli/assets/js/src/*
+
+onlyBuiltDependencies:
+  - esbuild

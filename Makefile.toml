@@ -2,456 +2,87 @@
   default_to_workspace = false
   skip_core_tasks      = true
 
-[env]
-  CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
-  CHANGELOG_FILE                       = "CHANGELOG.md"
-  CLI_OUT_DIR                          = "out/cli"
-  CLI_PROJECT_DIR                      = "projects/cli"
-  CORE_PROJECT_DIR                     = "projects/core"
-  OUT_DIR                              = "out"
-  SO_OUT_DIR                           = "out/so"
-  WASM_OUT_DIR                         = "out/wasm"
-
-  # Cross toolchains (must match flake.nix env)
-  AR_aarch64_linux_android                  = "aarch64-unknown-linux-android-ar"
-  AR_aarch64_pc_windows_gnullvm             = "aarch64-w64-mingw32-ar"
-  AR_aarch64_unknown_linux_gnu              = "aarch64-unknown-linux-gnu-ar"
-  AR_x86_64_pc_windows_gnu                  = "x86_64-w64-mingw32-ar"
-  AR_x86_64_unknown_linux_gnu               = "ar"
-  CARGO_TARGET_AARCH64_LINUX_ANDROID_AR     = "aarch64-unknown-linux-android-ar"
-  CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "aarch64-unknown-linux-android-clang"
-  CC_aarch64_linux_android                  = "aarch64-unknown-linux-android-clang"
-  CC_aarch64_pc_windows_gnullvm             = "aarch64-w64-mingw32-clang"
-  CC_aarch64_unknown_linux_gnu              = "aarch64-unknown-linux-gnu-gcc"
-  CC_x86_64_pc_windows_gnu                  = "x86_64-w64-mingw32-gcc"
-  CC_x86_64_unknown_linux_gnu               = "gcc"
-  CXX_aarch64_linux_android                 = "aarch64-unknown-linux-android-clang++"
-  CXX_aarch64_pc_windows_gnullvm            = "aarch64-w64-mingw32-clang++"
-  CXX_aarch64_unknown_linux_gnu             = "aarch64-unknown-linux-gnu-g++"
-  CXX_x86_64_pc_windows_gnu                 = "x86_64-w64-mingw32-g++"
-  CXX_x86_64_unknown_linux_gnu              = "g++"
-
-  # ==================== WASM 构建 ====================
+  # ==================== DEPRECATED ====================
+  # This Makefile.toml is now just a thin wrapper around xtask.
+  # You can use `cargo xtask` directly for all build tasks.
+  # Run `cargo xtask --help` to see all available commands.
+  # =====================================================
 
 [tasks.wasm]
-  description = "Build WASM package from core"
-  script = '''
-#!/usr/bin/env bash
-set -euo pipefail
-
-echo "🔨 Building NovelSaga WASM from core..."
-
-WASM_OUT_DIR_REAL="$(realpath -m "${WASM_OUT_DIR}")"
-
-# 检查 wasm-pack
-if ! command -v wasm-pack &> /dev/null; then
-    echo "❌ wasm-pack not found, installing..."
-    cargo install wasm-pack
-fi
-
-# 清理并创建输出目录
-rm -rf "${WASM_OUT_DIR_REAL}"
-mkdir -p "${WASM_OUT_DIR_REAL}"
-
-# 构建
-echo "📦 Building with wasm-pack..."
-wasm-pack build "${CORE_PROJECT_DIR}" --target web --release --out-dir "${WASM_OUT_DIR_REAL}"
-
-echo ""
-echo "✅ Build complete!"
-echo "📊 Package size:"
-du -h "${WASM_OUT_DIR_REAL}/novelsaga_core_bg.wasm"
-echo ""
-echo "🚀 WASM package ready at: ${WASM_OUT_DIR}"
-'''
-
-  # ==================== 动态库 (SO/DLL/DYLIB) 构建 ====================
+  args    = ["xtask", "wasm"]
+  command = "cargo"
 
 [tasks.so]
-  description = "Build Shared Library (.so/.dll/.dylib) for a single target"
   script = '''
-#!/usr/bin/env bash
-set -euo pipefail
-
-# 从环境变量获取目标，如果未设置则根据当前系统推断
-if [ -z "${SO_TARGET:-}" ]; then
-    case "$(uname -s)-$(uname -m)" in
-        Linux-x86_64)
-            SO_TARGET="linux-x64"
-            ;;
-        Linux-aarch64)
-            SO_TARGET="linux-arm64"
-            ;;
-        Darwin-x86_64)
-            SO_TARGET="macos-x64"
-            ;;
-        Darwin-arm64)
-            SO_TARGET="macos-arm64"
-            ;;
-        *)
-            echo "❌ Unsupported platform: $(uname -s)-$(uname -m)"
-            exit 1
-            ;;
-    esac
-fi
-
-echo "🚀 Building NovelSaga Shared Library for $SO_TARGET..."
-
-# 目标映射与文件名处理
-case "$SO_TARGET" in
-    macos-arm64)
-        CARGO_TARGET="aarch64-apple-darwin"
-        LIB_NAME="libnovelsaga_core.dylib"
-        ;;
-    macos-x64)
-        CARGO_TARGET="x86_64-apple-darwin"
-        LIB_NAME="libnovelsaga_core.dylib"
-        ;;
-    windows-arm64)
-        CARGO_TARGET="aarch64-pc-windows-gnullvm"
-        LIB_NAME="novelsaga_core.dll"
-        ;;
-    windows-x64)
-        CARGO_TARGET="x86_64-pc-windows-gnu"
-        LIB_NAME="novelsaga_core.dll"
-        ;;
-    linux-arm64)
-        CARGO_TARGET="aarch64-unknown-linux-gnu"
-        LIB_NAME="libnovelsaga_core.so"
-        ;;
-    linux-x64)
-        CARGO_TARGET="x86_64-unknown-linux-gnu"
-        LIB_NAME="libnovelsaga_core.so"
-        ;;
-    android-arm64)
-        CARGO_TARGET="aarch64-linux-android"
-        LIB_NAME="libnovelsaga_core.so"
-        ;;
-    *)
-        echo "❌ Unknown target: $SO_TARGET"
-        echo "Available targets: macos-arm64, macos-x64, windows-arm64, windows-x64, linux-arm64, linux-x64, android-arm64"
-        exit 1
-        ;;
-esac
-
-SO_OUT_DIR_REAL="$(realpath -m "${SO_OUT_DIR}/$SO_TARGET")"
-CORE_PROJECT_DIR_REAL="$(realpath -m "${CORE_PROJECT_DIR}")"
-
-# 创建输出目录
-rm -rf "${SO_OUT_DIR_REAL}"
-mkdir -p "${SO_OUT_DIR_REAL}/include"
-
-cd "${CORE_PROJECT_DIR_REAL}"
-
-TARGET_DIR_REAL="$(realpath -m "${CARGO_TARGET_DIR:-../../target}")"
-
-echo "🔨 Building for $CARGO_TARGET..."
-
-# 构建动态库
-cargo zigbuild --release --target "$CARGO_TARGET" --features ffi --target-dir "${TARGET_DIR_REAL}"
-
-# 生成 safer-ffi C 头文件
-echo "📄 Generating C header with safer-ffi..."
-cargo run -p novelsaga-core --features headers --bin generate-headers
-
-# 移动头文件到输出目录
-if [ -f "novelsaga_core.h" ]; then
-    mv "novelsaga_core.h" "${SO_OUT_DIR_REAL}/include/"
-    echo "✅ Header generated: ${SO_OUT_DIR}/$SO_TARGET/include/novelsaga_core.h"
+if [ -n "${SO_TARGET:-}" ]; then
+    cargo xtask so --target "$SO_TARGET"
 else
-    echo "❌ Header file not found!"
-    exit 1
+    cargo xtask so
 fi
-
-# 复制生成的库文件
-LIB_FILE="${TARGET_DIR_REAL}/$CARGO_TARGET/release/$LIB_NAME"
-if [ -f "$LIB_FILE" ]; then
-    cp "$LIB_FILE" "${SO_OUT_DIR_REAL}/"
-    echo "✅ Build complete!"
-    echo "📊 Library size:"
-    du -h "${SO_OUT_DIR_REAL}/$LIB_NAME"
-    echo ""
-    echo "🚀 Library ready at: ${SO_OUT_DIR}/$SO_TARGET/"
-else
-    echo "❌ Failed to find library file at: $LIB_FILE"
-    exit 1
-fi
-
-cd ../..
 '''
+  script_runner = "@shell"
 
 [tasks.so-all]
-  description = "Build Shared Library for all 7 platforms"
-  script = '''
-#!/usr/bin/env bash
-set -euo pipefail
-
-echo "🚀 Building NovelSaga Shared Library for all platforms..."
-
-# 清理输出目录
-rm -rf "${SO_OUT_DIR}"
-mkdir -p "${SO_OUT_DIR}"
-
-# 所有目标平台
-TARGETS=("macos-arm64" "macos-x64" "windows-arm64" "windows-x64" "linux-arm64" "linux-x64" "android-arm64")
-
-# 循环构建每个平台
-for target in "${TARGETS[@]}"; do
-    echo ""
-    echo "════════════════════════════════════════"
-    cargo make --env SO_TARGET="$target" \
-               --env SO_OUT_DIR="${SO_OUT_DIR}" \
-               so
-done
-
-echo ""
-echo "════════════════════════════════════════"
-echo "✅ All platforms built successfully!"
-echo ""
-echo "📊 Library sizes:"
-find "${SO_OUT_DIR}" -type f \( -name "*.so" -o -name "*.dll" -o -name "*.dylib" \) -exec du -h {} \;
-
-echo ""
-echo "📁 Output structure:"
-find "${SO_OUT_DIR}" -maxdepth 2 -not -path '*/.*'
-'''
-
-  # ==================== CLI 跨平台构建 ====================
+  args    = ["xtask", "so-all"]
+  command = "cargo"
 
 [tasks.cli]
-  description = "Build CLI for a single target platform"
   script = '''
-#!/usr/bin/env bash
-set -euo pipefail
-
-# 从环境变量获取目标，如果未设置则根据当前系统推断
-if [ -z "${CLI_TARGET:-}" ]; then
-    case "$(uname -s)-$(uname -m)" in
-        Linux-x86_64)
-            CLI_TARGET="linux-x64"
-            ;;
-        Linux-aarch64)
-            CLI_TARGET="linux-arm64"
-            ;;
-        Darwin-x86_64)
-            CLI_TARGET="macos-x64"
-            ;;
-        Darwin-arm64)
-            CLI_TARGET="macos-arm64"
-            ;;
-        *)
-            echo "❌ Unsupported platform: $(uname -s)-$(uname -m)"
-            exit 1
-            ;;
-    esac
-fi
-
-echo "🚀 Building NovelSaga CLI for $CLI_TARGET..."
-
-# 目标映射
-case "$CLI_TARGET" in
-    macos-arm64)
-        CARGO_TARGET="aarch64-apple-darwin"
-        BINARY_NAME="novelsaga"
-        ;;
-    macos-x64)
-        CARGO_TARGET="x86_64-apple-darwin"
-        BINARY_NAME="novelsaga"
-        ;;
-    windows-arm64)
-        CARGO_TARGET="aarch64-pc-windows-gnullvm"
-        BINARY_NAME="novelsaga.exe"
-        ;;
-    windows-x64)
-        CARGO_TARGET="x86_64-pc-windows-gnu"
-        BINARY_NAME="novelsaga.exe"
-        ;;
-    linux-arm64)
-        CARGO_TARGET="aarch64-unknown-linux-gnu"
-        BINARY_NAME="novelsaga"
-        ;;
-    linux-x64)
-        CARGO_TARGET="x86_64-unknown-linux-gnu"
-        BINARY_NAME="novelsaga"
-        ;;
-    android-arm64)
-        CARGO_TARGET="aarch64-linux-android"
-        BINARY_NAME="novelsaga"
-        ;;
-    *)
-        echo "❌ Unknown target: $CLI_TARGET"
-        echo "Available targets: macos-arm64, macos-x64, windows-arm64, windows-x64, linux-arm64, linux-x64, android-arm64"
-        exit 1
-        ;;
-esac
-
-CLI_OUT_DIR_REAL="$(realpath -m "${CLI_OUT_DIR}")"
-
-# 创建输出目录
-mkdir -p "${CLI_OUT_DIR_REAL}/$CLI_TARGET"
-
-cd "${CLI_PROJECT_DIR}"
-
-TARGET_DIR_REAL="$(realpath -m "${CARGO_TARGET_DIR:-../../target}")"
-
-echo "🔨 Building for $CARGO_TARGET..."
-
-# 使用 cargo-zigbuild 进行跨平台编译
-if cargo zigbuild --release --target "$CARGO_TARGET" --target-dir "${TARGET_DIR_REAL}" 2>&1; then
-  artifact="${TARGET_DIR_REAL}/$CARGO_TARGET/release/$BINARY_NAME"
-  if [ ! -f "$artifact" ]; then
-    echo "❌ Built binary missing: $artifact"
-    exit 1
-  fi
-  cp "$artifact" "${CLI_OUT_DIR_REAL}/$CLI_TARGET/"
-  echo "✅ $CARGO_TARGET -> ${CLI_OUT_DIR_REAL}/$CLI_TARGET/"
+if [ -n "${CLI_TARGET:-}" ]; then
+    cargo xtask cli --target "$CLI_TARGET"
 else
-    echo "❌ Failed to build for $CARGO_TARGET"
-    exit 1
+    cargo xtask cli
 fi
-
-cd ../..
-
-echo ""
-echo "✅ CLI build complete!"
-echo "📊 Binary size:"
-du -h "${CLI_OUT_DIR}/$CLI_TARGET/$BINARY_NAME" 2>/dev/null || true
-
-echo ""
-echo "🚀 Binary ready: ${CLI_OUT_DIR}/$CLI_TARGET/$BINARY_NAME"
 '''
+  script_runner = "@shell"
 
 [tasks.cli-all]
-  description = "Build CLI for all 6 platforms using cargo-zigbuild"
-  script = '''
-#!/usr/bin/env bash
-set -euo pipefail
-
-echo "🚀 Building NovelSaga CLI for all platforms..."
-
-# 清理输出目录
-rm -rf "${CLI_OUT_DIR}"
-mkdir -p "${CLI_OUT_DIR}"
-
-# 所有目标平台（移除 android-arm64，改用 .so）
-TARGETS=("macos-arm64" "macos-x64" "windows-arm64" "windows-x64" "linux-arm64" "linux-x64")
-
-# 循环构建每个平台
-for target in "${TARGETS[@]}"; do
-    echo ""
-    echo "════════════════════════════════════════"
-    cargo make --env CLI_TARGET="$target" \
-               --env CLI_OUT_DIR="${CLI_OUT_DIR}" \
-               cli
-done
-
-echo ""
-echo "════════════════════════════════════════"
-echo "✅ All platforms built successfully!"
-echo ""
-echo "📊 Binary sizes:"
-find "${CLI_OUT_DIR}" -type f \( -executable -o -name "*.exe" \) -exec du -h {} \; 2>/dev/null || true
-
-echo ""
-echo "📁 Output structure:"
-if command -v tree &> /dev/null; then
-    tree "${CLI_OUT_DIR}"
-else
-    find "${CLI_OUT_DIR}" -type f
-fi
-
-echo ""
-echo "🚀 Binaries ready for distribution!"
-'''
-
-  # ==================== 清理任务 ====================
-
-[tasks.clean-wasm]
-  description = "Clean WASM build artifacts"
-  script = '''
-rm -rf "${WASM_OUT_DIR}"
-echo "✅ WASM artifacts cleaned"
-'''
-
-[tasks.clean-so]
-  description = "Clean Shared Library build artifacts"
-  script = '''
-rm -rf "${SO_OUT_DIR}"
-echo "✅ Shared Library artifacts cleaned"
-'''
-
-[tasks.clean-cli]
-  description = "Clean CLI build artifacts"
-  script = '''
-rm -rf "${CLI_OUT_DIR}"
-echo "✅ CLI artifacts cleaned"
-'''
-
-[tasks.clean-all]
-  dependencies = ["clean-wasm", "clean-so", "clean-cli"]
-  description = "Clean all build artifacts"
-  script = '''
-cargo clean
-rm -rf "${OUT_DIR}"
-echo "✅ All artifacts cleaned"
-'''
-
-  # ==================== Changelog ====================
-
-[tasks.changelog]
-  description = "Generate or update CHANGELOG.md using git-cliff"
-  script = '''
-#!/usr/bin/env bash
-set -euo pipefail
-
-git-cliff --config cliff.toml --output "${CHANGELOG_FILE}"
-
-echo "✅ Changelog written to ${CHANGELOG_FILE}"
-'''
-
-[tasks.changelog-preview]
-  description = "Preview unreleased changelog entries"
-  script = '''
-#!/usr/bin/env bash
-set -euo pipefail
-
-git-cliff --config cliff.toml --unreleased
-'''
-
-  # ==================== 组合任务 ====================
+  args    = ["xtask", "cli-all"]
+  command = "cargo"
 
 [tasks.build-all]
-  dependencies = ["wasm", "so-all", "cli-all"]
-  description  = "Build WASM, Shared Libraries, and CLI for all platforms"
+  args    = ["xtask", "build-all"]
+  command = "cargo"
+
+[tasks.gen-ts-bindings]
+  args    = ["xtask", "gen-ts-bindings"]
+  command = "cargo"
+
+[tasks.clean-wasm]
+  args    = ["xtask", "clean-wasm"]
+  command = "cargo"
+
+[tasks.clean-so]
+  args    = ["xtask", "clean-so"]
+  command = "cargo"
+
+[tasks.clean-cli]
+  args    = ["xtask", "clean-cli"]
+  command = "cargo"
+
+[tasks.clean-all]
+  args    = ["xtask", "clean-all"]
+  command = "cargo"
 
 [tasks.default]
-  description = "Show available tasks"
   script = '''
-echo "📋 Available tasks:"
+echo "📋 NovelSaga Build Tasks (now using xtask)"
 echo ""
-echo "  WASM:"
-echo "    makers wasm          - Build WASM from core"
+echo "⚠️  Note: This Makefile.toml is deprecated. Use 'cargo xtask' directly."
 echo ""
-echo "  Shared Library (FFI):"
-echo "    makers so            - Build Shared Library (.so/.dll/.dylib) for current platform"
-echo "                           (or specify: makers so --env SO_TARGET=windows-x64)"
-echo "    makers so-all        - Build Shared Library for all 7 platforms"
+echo "Available commands:"
+echo "  cargo xtask wasm                    - Build WASM package"
+echo "  cargo xtask so [--target TARGET]    - Build Shared Library"
+echo "  cargo xtask so-all                  - Build SO for all platforms"
+echo "  cargo xtask cli [--target TARGET]   - Build CLI binary"
+echo "  cargo xtask cli-all                 - Build CLI for all platforms"
+echo "  cargo xtask build-all               - Build everything"
+echo "  cargo xtask gen-ts-bindings         - Generate TypeScript bindings"
+echo "  cargo xtask clean-all               - Clean all artifacts"
 echo ""
-echo "  CLI:"
-echo "    makers cli           - Build CLI for current platform"
-echo "                           (or specify: makers cli --env CLI_TARGET=linux-x64)"
-echo "    makers cli-all       - Build CLI for all 6 platforms (excluding Android)"
+echo "  cargo xtask --help                  - Show all available commands"
 echo ""
-echo "  Other:"
-echo "    makers build-all     - Build WASM, Shared Libraries, and CLI for all platforms"
-echo "    makers clean-all     - Clean all artifacts"
-echo ""
-echo "  Changelog:"
-echo "    makers changelog           - Generate or update ${CHANGELOG_FILE} via git-cliff"
-echo "    makers changelog-preview   - Show unreleased entries"
-echo ""
-echo "  Available targets (SO/CLI):"
-echo "    macos-arm64, macos-x64, windows-arm64, windows-x64,"
-echo "    linux-arm64, linux-x64, android-arm64 (SO only)"
+echo "Targets: macos-arm64, macos-x64, windows-arm64, windows-x64,"
+echo "         linux-arm64, linux-x64, android-arm64 (SO only)"
 echo ""
 '''

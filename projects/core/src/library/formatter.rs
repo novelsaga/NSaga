@@ -1,13 +1,11 @@
-#[cfg(feature = "ffi")]
-use safer_ffi::prelude::*;
-
 use crate::{article, config};
 
-/// 核心格式化函数 - 纯计算逻辑,无 I/O
+/// 内部格式化函数 - 纯字符串处理逻辑
+///
+/// 供 diplomat FFI 和内部使用
 #[must_use]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
-pub fn format_text(article: &article::Article, config: &config::formatter::FormatConfig) -> article::Article {
-  let pangu_formatted = pangu::spacing(article.content_ref()).into_owned();
+pub fn format_text_internal(content: &str, indent_spaces: usize, blank_lines_between_paragraphs: usize) -> String {
+  let pangu_formatted = pangu::spacing(content).into_owned();
   let lines: Vec<&str> = pangu_formatted.lines().collect();
 
   // 丢弃只有空格的行
@@ -16,7 +14,7 @@ pub fn format_text(article: &article::Article, config: &config::formatter::Forma
     if line.trim().is_empty() {
       continue;
     }
-    let indented_line = format!("{}{}", " ".repeat(config.indent_spaces), line.trim());
+    let indented_line = format!("{}{}", " ".repeat(indent_spaces), line.trim());
     formatted_lines.push(indented_line);
   }
 
@@ -25,25 +23,24 @@ pub fn format_text(article: &article::Article, config: &config::formatter::Forma
   for (i, line) in formatted_lines.iter().enumerate() {
     result_lines.push(line.clone());
     if i < formatted_lines.len() - 1 {
-      for _ in 0..config.blank_lines_between_paragraphs {
+      for _ in 0..blank_lines_between_paragraphs {
         result_lines.push(String::new());
       }
     }
   }
 
-  article::Article::new(result_lines.join("\n"))
+  result_lines.join("\n")
 }
 
-/// FFI 版本的格式化函数
-///
-/// **导出目标**: SO
-#[cfg(feature = "ffi")]
-#[ffi_export]
-pub fn novelsaga_format_text(
-  article: &article::Article,
-  config: &config::formatter::FormatConfig,
-) -> repr_c::Box<article::Article> {
-  Box::new(format_text(article, config)).into()
+/// 核心格式化函数 - 纯计算逻辑,无 I/O
+#[must_use]
+pub fn format_text(article: &article::Article, config: &config::formatter::FormatConfig) -> article::Article {
+  let formatted = format_text_internal(
+    article.content_ref(),
+    config.indent_spaces,
+    config.blank_lines_between_paragraphs,
+  );
+  article::Article::new(formatted)
 }
 
 #[cfg(test)]

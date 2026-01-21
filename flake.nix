@@ -33,7 +33,7 @@
         rust-overlay.follows = "rust-overlay";
       };
     };
-    nixpkgs-for-nodejs.url = "github:NixOS/nixpkgs/23735a82a828372c4ef92c660864e82fbe2f5fbe"; #24.11.1
+    nixpkgs-for-nodejs.url = "github:NixOS/nixpkgs/23735a82a828372c4ef92c660864e82fbe2f5fbe"; # 24.11.1
   };
 
   nixConfig = {
@@ -56,7 +56,9 @@
         inputs.devenv.flakeModule
       ];
       systems = with lib;
-        intersectLists (platforms.linux ++ platforms.darwin) (intersectLists (platforms.aarch64 ++ platforms.x86_64) systems.flakeExposed);
+        intersectLists (platforms.linux ++ platforms.darwin) (
+          intersectLists (platforms.aarch64 ++ platforms.x86_64) systems.flakeExposed
+        );
       perSystem = {
         config,
         self',
@@ -109,7 +111,6 @@
             (with pkgs; [
               shfmt
               cargo-zigbuild
-              cargo-make
               git-cliff
               inputs.rustowl-flake.packages.${system}.rustowl
               lldb

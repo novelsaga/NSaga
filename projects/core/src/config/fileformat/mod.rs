@@ -3,6 +3,8 @@ use std::{collections::HashMap, error::Error};
 use config::{FileFormat, FileStoredFormat, Format};
 use gray_matter::{Matter, Pod};
 
+use crate::state::init::Initializer;
+
 #[derive(Debug, Clone, Copy)]
 pub enum NovelSagaFileFormat {
   Markdown,
@@ -35,12 +37,26 @@ impl Format for NovelSagaFileFormat {
         FileFormat::Yaml.parse(uri, &parsed.matter)
       }
       NovelSagaFileFormat::JavaScript => {
-        // @todo 实现 JS 配置文件的解析
-        Err("JavaScript config parsing not implemented".into())
+        // 通过全局单例获取 loader
+        let state = Initializer::get().map_err(|_| "Global state not initialized. Call Initializer::init() first.")?;
+
+        let loader = state.feature().js_loader().ok_or("JavaScript loader not available")?;
+
+        let map = loader(text)?;
+        let json_str = serde_json::to_string(&map).map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+
+        FileFormat::Json.parse(uri, &json_str)
       }
       NovelSagaFileFormat::TypeScript => {
-        // @todo 实现 TS 配置文件的解析
-        Err("TypeScript config parsing not implemented".into())
+        // 通过全局单例获取 loader
+        let state = Initializer::get().map_err(|_| "Global state not initialized. Call Initializer::init() first.")?;
+
+        let loader = state.feature().ts_loader().ok_or("TypeScript loader not available")?;
+
+        let map = loader(text)?;
+        let json_str = serde_json::to_string(&map).map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+
+        FileFormat::Json.parse(uri, &json_str)
       }
     }
   }

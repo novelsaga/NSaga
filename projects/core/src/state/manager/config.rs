@@ -16,14 +16,13 @@ use crate::{
   state::feat::Feature,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct ConfigManager {
   // 全局根配置（只加载一次，不可修改）
   root_config: RootConfig,
   root_dir: PathBuf,
   cache: Arc<RwLock<HashMap<PathBuf, OverridableConfig>>>,
-  js_supported: bool,
-  ts_supported: bool,
+  feature: Feature,
 }
 
 #[allow(dead_code)]
@@ -41,8 +40,8 @@ impl ConfigManager {
       feature.js_support(),
       feature.ts_support(),
     ) {
-      let root_config = Self::load_root_config_file(&root_config_file, feature.js_support(), feature.ts_support())
-        .expect("Failed to load root config file");
+      let root_config =
+        Self::load_root_config_file(&root_config_file, &feature).expect("Failed to load root config file");
       (root_config_file.parent().unwrap().to_path_buf(), root_config)
     } else {
       // 未找到配置文件，使用默认配置
@@ -50,11 +49,10 @@ impl ConfigManager {
     };
 
     Self {
-      root_config: root_config.root.unwrap_or_default(),
+      root_config: root_config.root,
       cache: Arc::new(RwLock::new(HashMap::new())),
       root_dir,
-      js_supported: feature.js_support(),
-      ts_supported: feature.ts_support(),
+      feature,
     }
   }
 
@@ -94,7 +92,9 @@ impl ConfigManager {
 
     loop {
       // 尝试在当前目录查找配置文件
-      if let Ok(candidate) = Self::find_config_file_in_directory(current_path, self.js_supported, self.ts_supported) {
+      if let Ok(candidate) =
+        Self::find_config_file_in_directory(current_path, self.feature.js_support(), self.feature.ts_support())
+      {
         config_files.push_front(candidate);
       }
 
@@ -176,34 +176,10 @@ impl ConfigManager {
     }
   }
 
-  fn load_root_config_file(
-    path: &Path,
-    js_supported: bool,
-    ts_supported: bool,
-  ) -> Result<NovelSagaConfig, config::ConfigError> {
-    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-    if NovelSagaFileFormat::JavaScript.file_extensions().contains(&ext) && js_supported {
-      // JS loader
-      let config = config::Config::builder()
-        .add_source(config::File::new(
-          path.to_str().unwrap(),
-          NovelSagaFileFormat::JavaScript,
-        ))
-        .build()?;
-      config.try_deserialize()
-    } else if NovelSagaFileFormat::TypeScript.file_extensions().contains(&ext) && ts_supported {
-      // TS loader
-      let config = config::Config::builder()
-        .add_source(config::File::new(
-          path.to_str().unwrap(),
-          NovelSagaFileFormat::TypeScript,
-        ))
-        .build()?;
-      config.try_deserialize()
-    } else {
-      let config = config::Config::builder().add_source(config::File::from(path)).build()?;
-      config.try_deserialize()
-    }
+  fn load_root_config_file(path: &Path, _feature: &Feature) -> Result<NovelSagaConfig, config::ConfigError> {
+    // 统一使用 config::File 加载，NovelSagaFileFormat 会自动通过全局单例获取 loader
+    let config = config::Config::builder().add_source(config::File::from(path)).build()?;
+    config.try_deserialize()
   }
 
   fn load_override_config_file(&self, path: &Path) -> Result<OverridableConfig, config::ConfigError> {
@@ -217,15 +193,15 @@ impl ConfigManager {
     // 加载所有父级目录的配置文件
     let mut cfg_builder_parents = config::Config::builder();
     for parent_cfg_path in self.get_config_files_on_every_parent_dirs(path.parent().unwrap()) {
-      let config_file_result =
-        Self::find_config_file_in_directory(parent_cfg_path.parent().unwrap(), self.js_supported, self.ts_supported);
+      let config_file_result = Self::find_config_file_in_directory(
+        parent_cfg_path.parent().unwrap(),
+        self.feature.js_support(),
+        self.feature.ts_support(),
+      );
       if let Ok(cfg_path) = config_file_result {
-        let ext = cfg_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-        if get_base_config_file_extensions().contains(&ext) {
-          // JSON 等可被 `config` 直接加载的文件
-          dbg!(cfg_path.display());
-          cfg_builder_parents = cfg_builder_parents.add_source(config::File::from(cfg_path));
-        }
+        dbg!(cfg_path.display());
+        // 统一使用 config::File，会自动根据扩展名选择合适的 Format
+        cfg_builder_parents = cfg_builder_parents.add_source(config::File::from(cfg_path));
       }
     }
     dbg!(path.display());
@@ -235,6 +211,18 @@ impl ConfigManager {
     } else if NovelSagaFileFormat::Markdown.file_extensions().contains(&ext) {
       // md loader --- 自定义解析 frontmatter 返回 OverridableConfig
       Ok(cfg_builder_parents.add_source(config::File::new(path.to_str().unwrap(), NovelSagaFileFormat::Markdown)))
+    } else if NovelSagaFileFormat::JavaScript.file_extensions().contains(&ext) {
+      // JS 配置文件
+      Ok(cfg_builder_parents.add_source(config::File::new(
+        path.to_str().unwrap(),
+        NovelSagaFileFormat::JavaScript,
+      )))
+    } else if NovelSagaFileFormat::TypeScript.file_extensions().contains(&ext) {
+      // TS 配置文件
+      Ok(cfg_builder_parents.add_source(config::File::new(
+        path.to_str().unwrap(),
+        NovelSagaFileFormat::TypeScript,
+      )))
     } else {
       Err(config::ConfigError::Message(format!(
         "Unsupported config file extension: {ext}"
@@ -304,9 +292,9 @@ impl ConfigManager {
         // 记录已有的配置文件（用于在未找到 workspace 字段时选最顶层）
         searched_paths.push_back(candidate.clone());
         // 尝试加载并检查 workspace 字段
-        if let Ok(config) = Self::load_root_config_file(&candidate, js_supported, ts_supported)
-          && let Some(root) = config.root
-          && root.workspace.is_some()
+        let temp_feature = Feature::new(None, None);
+        if let Ok(config) = Self::load_root_config_file(&candidate, &temp_feature)
+          && config.root.workspace.is_some()
         {
           return Ok(candidate);
         }
@@ -371,7 +359,7 @@ mod test {
       .join("sub");
     let assets_test_md = assets_test_md_dir.clone().join("test.md");
     dbg!(&assets_test_md);
-    let manager = super::ConfigManager::new(Feature::new(true, true));
+    let manager = super::ConfigManager::new(Feature::new(None, None));
     let result = manager.load_override_config_file(&assets_test_md);
     if let Err(e) = &result {
       eprintln!("Error loading config: {e}");
@@ -412,7 +400,7 @@ mod test {
       .join("sub")
       .join("test-ignore.md");
     dbg!(&assets_test_ignore_dir);
-    let manager = super::ConfigManager::new(Feature::new(true, true));
+    let manager = super::ConfigManager::new(Feature::new(None, None));
     let is_ignored = manager.is_ignored_config_file(&assets_test_ignore_dir);
     dbg!(is_ignored);
     assert!(is_ignored);
@@ -433,7 +421,7 @@ mod test {
       .join("watcher_test");
     let test_config_path = assets_test_watcher_dir.join("novelsaga.config.json");
     dbg!(&test_config_path);
-    let manager = super::ConfigManager::new(Feature::new(true, true));
+    let manager = super::ConfigManager::new(Feature::new(None, None));
     // 首次加载
     let result1 = manager.get_override_config(&test_config_path);
     assert!(result1.is_ok());
