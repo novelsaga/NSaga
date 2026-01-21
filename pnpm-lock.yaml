@@ -8,18 +8,41 @@ importers:
 
   .:
     devDependencies:
+      esbuild:
+        specifier: ^0.27.2
+        version: 0.27.2
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
-  projects/cli/assets/js/src/nodejs-config-bridge:
+  projects/cli/assets/js/src/bridge-core:
     devDependencies:
       '@types/node':
         specifier: ^24.10.4
         version: 24.10.4
-      esbuild:
-        specifier: ^0.27.2
-        version: 0.27.2
+
+  projects/cli/assets/js/src/bridge-nodejs:
+    dependencies:
+      '@nsaga/bridge-core':
+        specifier: workspace:*
+        version: link:../bridge-core
+    devDependencies:
+      '@types/node':
+        specifier: ^24.10.4
+        version: 24.10.4
+
+  projects/cli/assets/js/src/config-bridge:
+    dependencies:
+      '@nsaga/bridge-nodejs':
+        specifier: workspace:*
+        version: link:../bridge-nodejs
+    devDependencies:
+      '@nsaga/bridge-core':
+        specifier: workspace:*
+        version: link:../bridge-core
+      '@types/node':
+        specifier: ^24.10.4
+        version: 24.10.4
 
 packages:
 

@@ -6,8 +6,11 @@
   "scripts": {
     "build": "node build.mts"
   },
+  "dependencies": {
+    "@nsaga/bridge-nodejs": "workspace:*"
+  },
   "devDependencies": {
-    "@types/node": "^24.10.4",
-    "esbuild": "^0.27.2"
+    "@nsaga/bridge-core": "workspace:*",
+    "@types/node": "^24.10.4"
   }
 }

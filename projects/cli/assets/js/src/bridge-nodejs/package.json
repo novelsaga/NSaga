@@ -1,0 +1,30 @@
+{
+  "name": "@nsaga/bridge-nodejs",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Node.js runtime adapter for NovelSaga bridge system",
+  "exports": {
+    "./transport": {
+      "types": "./dist/transport.d.ts",
+      "default": "./dist/transport.js"
+    },
+    "./rpc-handler": {
+      "types": "./dist/rpc-handler.d.ts",
+      "default": "./dist/rpc-handler.js"
+    },
+    "./bridge-server": {
+      "types": "./dist/bridge-server.d.ts",
+      "default": "./dist/bridge-server.js"
+    }
+  },
+  "scripts": {
+    "build": "node build.mts"
+  },
+  "dependencies": {
+    "@nsaga/bridge-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.4"
+  }
+}
