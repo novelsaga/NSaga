@@ -2,6 +2,7 @@
  * Transport 层 - 处理 stdin/stdout 通信（Deno 原生 API）
  */
 
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="../deno.d.ts" />
 
 import type { MessageHandler, Transport } from '@nsaga/bridge-core/interfaces/transport'
@@ -14,8 +15,7 @@ export class StdioTransport implements Transport {
   private buffer = ''
 
   constructor() {
-    // 使用 Deno 原生 API 读取 stdin
-    this.startReading()
+    void this.startReading()
   }
 
   /**
@@ -60,10 +60,9 @@ export class StdioTransport implements Transport {
    */
   send(message: RPCResponse): void {
     const json = JSON.stringify(message)
-    // 使用 Deno.stdout.writable 写入
     const writer = Deno.stdout.writable.getWriter()
     const encoded = this.encoder.encode(json + '\n')
-    writer.write(encoded).then(() => writer.releaseLock())
+    void writer.write(encoded).then(() => writer.releaseLock())
   }
 
   /**
@@ -79,7 +78,7 @@ export class StdioTransport implements Transport {
   private handleMessage(message: string): void {
     for (const handler of this.messageHandlers) {
       try {
-        handler(message)
+        void handler(message)
       } catch (error) {
         console.error('Error in message handler:', error)
       }

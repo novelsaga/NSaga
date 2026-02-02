@@ -2,11 +2,12 @@
 
 > 此文档记录了 NovelSaga 项目开发过程中已完成的任务历史。
 
-## 🎯 历史完成记录
+## 历史完成记录
 
 ### 优先级 P1: 代码质量和稳定性
 
 #### ~~任务 1.1: 清理编译警告~~ ✅ 已完成 (2026-01-26)
+
 - ✅ 常量复用：重构硬编码为常量引用
 - ✅ E2E 测试扩展：运行时矩阵测试
 - ✅ 架构优化：CLI ConfigLoader 只负责 JS/TS 加载（重构完成）
@@ -15,9 +16,11 @@
 ---
 
 #### ~~任务 1.1.1: 集成用户指定的运行时路径~~ ✅ 已完成 (2026-01-26)
+
 **文件**: `projects/cli/src/bridge/runtime/discovery.rs`, `projects/cli/src/args/mod.rs`, `projects/cli/src/config/loader.rs`
 
 **实现内容**:
+
 - ✅ `ConfigLoader` 接受 CLI 参数（运行时选择和路径）
 - ✅ `RuntimeDiscovery::find_runtime_with_preference()` 使用用户指定路径
 - ✅ `main.rs` 传递 CLI 参数给 `ConfigLoader`
@@ -28,9 +31,11 @@
 ---
 
 #### ~~任务 1.1.2: JS Bridge 自动构建集成~~ ✅ 已完成 (2026-01-26)
+
 **文件**: `xtask/src/tasks/build.rs`
 
 **实现内容**:
+
 - ✅ 创建 `xtask build-js` 命令（支持 `--force` 强制重建）
 - ✅ 自动检测 JS bridges 需要构建（基于 mtime 对比）
 - ✅ 递归检查源文件修改时间，智能跳过未修改的 bridge
@@ -40,6 +45,7 @@
 - ✅ 友好的输出信息（显示构建数量和跳过数量）
 
 **命令用法**:
+
 ```bash
 ./xtask.sh build-js           # 增量构建（跳过最新的）
 ./xtask.sh build-js --force   # 强制重新构建所有
@@ -50,9 +56,11 @@
 ---
 
 #### ~~任务 1.1.4: 清理废弃的测试文件~~ ✅ 已完成 (2026-01-26)
+
 **文件**: `projects/cli/assets/test/` (已删除)
 
 **实现内容**:
+
 - ✅ 将 9 处单元测试全部改用 `tempfile` 动态生成配置
 - ✅ 删除 `projects/cli/assets/test/` 目录及所有静态测试文件
 - ✅ 统一测试方式：所有测试（单元测试 + E2E）都使用临时文件
@@ -68,7 +76,9 @@
 ---
 
 #### ~~任务 1.3: 静态配置格式支持~~ ✅ 架构已正确实现
+
 **说明**:
+
 - ✅ Core 的 `ConfigManager` 已支持 .toml/.json/.yaml 等静态格式
 - ✅ CLI 的 `ConfigLoader` 只负责提供 JS/TS 加载能力（通过 `create_js_loader()` / `create_ts_loader()`）
 - ✅ 架构分工正确：Core 负责配置发现和静态格式加载，CLI 仅提供动态脚本加载闭包
@@ -80,7 +90,9 @@
 ### 优先级 P3: 性能优化 (部分)
 
 #### ~~任务 3.2: 配置缓存~~ ✅ Core 已实现
+
 **说明**:
+
 - ✅ Core 的 `ConfigManager` 已实现基于 mtime 的缓存（`get_override_config()` + `del_override_config_cache()`）
 - ✅ 支持热重载：修改配置文件后调用 `del_override_config_cache()` 清除缓存
 - ✅ 线程安全：使用 `Arc<RwLock<HashMap<PathBuf, OverridableConfig>>>`
@@ -101,16 +113,11 @@
 
 ```typescript
 // 修改前
-const commonTsFile = packages.flatMap((p) =>
-  [`${path.relative(__dirname, p.dir)}/**/*.{ts,cts,mts}`]
-)
+const commonTsFile = packages.flatMap((p) => [`${path.relative(__dirname, p.dir)}/**/*.{ts,cts,mts}`])
 
 // 修改后
-const getRootAndSrcTS = (root: string) =>
-  [`${root}/src/**/*.{ts,cts,mts}`, `${root}/*.{ts,cts,mts}`]
-const commonTsFile = packages.flatMap((p) =>
-  getRootAndSrcTS(path.relative(__dirname, p.dir) || '.')
-)
+const getRootAndSrcTS = (root: string) => [`${root}/src/**/*.{ts,cts,mts}`, `${root}/*.{ts,cts,mts}`]
+const commonTsFile = packages.flatMap((p) => getRootAndSrcTS(path.relative(__dirname, p.dir) || '.'))
 ```
 
 - **文件**: [eslint.config.mts](../../eslint.config.mts#L42-L44)

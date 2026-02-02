@@ -13,11 +13,25 @@ use crate::{
   bridge::{BridgeManager, ConfigBridge, RuntimeDiscovery, RuntimeType, env_keys},
 };
 
+/// Type alias for the config loader closure returned to Core
+pub type ConfigLoaderFn =
+  Arc<dyn Fn(&str) -> Result<HashMap<String, serde_json::Value>, Box<dyn Error + Send + Sync>> + Send + Sync>;
+
+/// Internal context for loading script configs (reduces function parameter count)
+struct LoaderContext<'a> {
+  manager: &'a Arc<BridgeManager>,
+  runtime_discovery: RuntimeDiscovery,
+  runtime_choice: RuntimeChoice,
+  node_path: Option<&'a PathBuf>,
+  bun_path: Option<&'a PathBuf>,
+  deno_path: Option<&'a PathBuf>,
+}
+
 /// CLI 配置加载器：仅负责通过 Bridge 加载 JS/TS 配置
 ///
 /// 架构说明：
-/// - Core 的 ConfigManager 负责查找配置文件和加载静态配置
-/// - CLI 的 ConfigLoader 仅提供 js_loader/ts_loader 闭包给 Core
+/// - Core 的 `ConfigManager` 负责查找配置文件和加载静态配置
+/// - CLI 的 `ConfigLoader` 仅提供 `js_loader/ts_loader` 闭包给 Core
 /// - 不要在 CLI 中重复实现配置查找逻辑
 #[derive(Clone)]
 pub struct ConfigLoader {
@@ -42,123 +56,69 @@ impl ConfigLoader {
   }
 
   /// 创建 JS 配置加载闭包，供 Core 的 Feature 使用
-  pub fn create_js_loader(
-    &self,
-  ) -> Arc<dyn Fn(&str) -> Result<HashMap<String, serde_json::Value>, Box<dyn Error + Send + Sync>> + Send + Sync> {
+  pub fn create_js_loader(&self) -> ConfigLoaderFn {
     let manager = self.manager.clone();
-    let runtime_discovery = self.runtime_discovery.clone();
+    let runtime_discovery = self.runtime_discovery;
     let runtime_choice = self.runtime_choice;
     let node_path = self.node_path.clone();
     let bun_path = self.bun_path.clone();
     let deno_path = self.deno_path.clone();
 
     Arc::new(move |config_path: &str| {
-      Self::load_js_config_impl(
-        &manager,
-        &runtime_discovery,
-        config_path,
+      let ctx = LoaderContext {
+        manager: &manager,
+        runtime_discovery,
         runtime_choice,
-        &node_path,
-        &bun_path,
-        &deno_path,
-      )
-      .map_err(|e| e.into())
+        node_path: node_path.as_ref(),
+        bun_path: bun_path.as_ref(),
+        deno_path: deno_path.as_ref(),
+      };
+      Self::load_script_config_impl(&ctx, config_path, false).map_err(std::convert::Into::into)
     })
   }
 
   /// 创建 TS 配置加载闭包，供 Core 的 Feature 使用
-  pub fn create_ts_loader(
-    &self,
-  ) -> Arc<dyn Fn(&str) -> Result<HashMap<String, serde_json::Value>, Box<dyn Error + Send + Sync>> + Send + Sync> {
+  pub fn create_ts_loader(&self) -> ConfigLoaderFn {
     let manager = self.manager.clone();
-    let runtime_discovery = self.runtime_discovery.clone();
+    let runtime_discovery = self.runtime_discovery;
     let runtime_choice = self.runtime_choice;
     let node_path = self.node_path.clone();
     let bun_path = self.bun_path.clone();
     let deno_path = self.deno_path.clone();
 
     Arc::new(move |config_path: &str| {
-      Self::load_ts_config_impl(
-        &manager,
-        &runtime_discovery,
-        config_path,
+      let ctx = LoaderContext {
+        manager: &manager,
+        runtime_discovery,
         runtime_choice,
-        &node_path,
-        &bun_path,
-        &deno_path,
-      )
-      .map_err(|e| e.into())
+        node_path: node_path.as_ref(),
+        bun_path: bun_path.as_ref(),
+        deno_path: deno_path.as_ref(),
+      };
+      Self::load_script_config_impl(&ctx, config_path, true).map_err(std::convert::Into::into)
     })
-  }
-
-  /// JS 配置加载实现
-  fn load_js_config_impl(
-    manager: &Arc<BridgeManager>,
-    runtime_discovery: &RuntimeDiscovery,
-    config_path: &str,
-    runtime_choice: RuntimeChoice,
-    node_path: &Option<PathBuf>,
-    bun_path: &Option<PathBuf>,
-    deno_path: &Option<PathBuf>,
-  ) -> Result<HashMap<String, serde_json::Value>> {
-    Self::load_script_config_impl(
-      manager,
-      runtime_discovery,
-      config_path,
-      false,
-      runtime_choice,
-      node_path,
-      bun_path,
-      deno_path,
-    )
-  }
-
-  /// TS 配置加载实现
-  fn load_ts_config_impl(
-    manager: &Arc<BridgeManager>,
-    runtime_discovery: &RuntimeDiscovery,
-    config_path: &str,
-    runtime_choice: RuntimeChoice,
-    node_path: &Option<PathBuf>,
-    bun_path: &Option<PathBuf>,
-    deno_path: &Option<PathBuf>,
-  ) -> Result<HashMap<String, serde_json::Value>> {
-    Self::load_script_config_impl(
-      manager,
-      runtime_discovery,
-      config_path,
-      true,
-      runtime_choice,
-      node_path,
-      bun_path,
-      deno_path,
-    )
   }
 
   /// 通用脚本配置加载实现
   fn load_script_config_impl(
-    manager: &Arc<BridgeManager>,
-    runtime_discovery: &RuntimeDiscovery,
+    ctx: &LoaderContext<'_>,
     config_path: &str,
     is_typescript: bool,
-    runtime_choice: RuntimeChoice,
-    node_path: &Option<PathBuf>,
-    bun_path: &Option<PathBuf>,
-    deno_path: &Option<PathBuf>,
   ) -> Result<HashMap<String, serde_json::Value>> {
     let bridge_script = Self::get_bridge_script_path()?;
 
     // 根据用户选择确定运行时类型和路径
-    let (preferred_runtime, user_path) = match runtime_choice {
+    let (preferred_runtime, user_path) = match ctx.runtime_choice {
       RuntimeChoice::Auto => (None, None),
-      RuntimeChoice::Node => (Some(RuntimeType::NodeJs), node_path.clone()),
-      RuntimeChoice::Bun => (Some(RuntimeType::Bun), bun_path.clone()),
-      RuntimeChoice::Deno => (Some(RuntimeType::Deno), deno_path.clone()),
+      RuntimeChoice::Node => (Some(RuntimeType::NodeJs), ctx.node_path.cloned()),
+      RuntimeChoice::Bun => (Some(RuntimeType::Bun), ctx.bun_path.cloned()),
+      RuntimeChoice::Deno => (Some(RuntimeType::Deno), ctx.deno_path.cloned()),
     };
 
-    let runtime_info = runtime_discovery
+    let runtime_info = ctx
+      .runtime_discovery
       .find_runtime_with_preference(preferred_runtime, user_path)
-      .map_err(|e| anyhow::anyhow!("Failed to find suitable runtime: {}", e))?;
+      .map_err(|e| anyhow::anyhow!("Failed to find suitable runtime: {e}"))?;
 
     // Convert to absolute path
     let config_path_buf = Path::new(config_path);
@@ -195,15 +155,16 @@ impl ConfigLoader {
     // Register the "config" bridge with unique name per config path
     let bridge_name = format!("config_{}", config_path_abs.to_string_lossy().replace(['/', '\\'], "_"));
 
-    manager.register(&bridge_name, move || {
+    ctx.manager.register(&bridge_name, move || {
       let bridge = ConfigBridge::new(runtime_info.clone(), &bridge_script, env_clone.clone())?;
       Ok(Box::new(bridge))
     });
 
     // Call config.get
-    let result_value = manager
+    let result_value = ctx
+      .manager
       .call(&bridge_name, "config.get", json!({}))
-      .map_err(|e| anyhow::anyhow!("Bridge call failed: {}", e))?;
+      .map_err(|e| anyhow::anyhow!("Bridge call failed: {e}"))?;
 
     // Return as HashMap for Core's LoaderFn signature
     if let serde_json::Value::Object(map) = result_value {

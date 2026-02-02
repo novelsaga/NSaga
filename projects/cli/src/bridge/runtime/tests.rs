@@ -1,6 +1,6 @@
 //! 运行时管理集成测试
 //!
-//! 手动运行: cargo test --package novelsaga-cli bridge::runtime::tests -- --nocapture --ignored
+//! 手动运行: `cargo test --package novelsaga-cli bridge::runtime::tests -- --nocapture --ignored`
 
 #[cfg(test)]
 mod integration_tests {
@@ -21,7 +21,7 @@ mod integration_tests {
   };
 
   #[test]
-  #[ignore] // 需要实际运行时环境
+  #[ignore = "requires actual runtime environment"]
   fn test_find_nodejs() {
     let discovery = RuntimeDiscovery::new();
     let result = discovery.find_runtime(RuntimeType::NodeJs).expect("Discovery failed");
@@ -38,7 +38,7 @@ mod integration_tests {
   }
 
   #[test]
-  #[ignore]
+  #[ignore = "requires actual runtime environment"]
   fn test_find_all_runtimes() {
     let discovery = RuntimeDiscovery::new();
     let runtimes = discovery.find_all_runtimes().expect("Discovery failed");
@@ -50,7 +50,7 @@ mod integration_tests {
   }
 
   #[test]
-  #[ignore]
+  #[ignore = "requires actual runtime environment"]
   fn test_find_best_runtime() {
     let discovery = RuntimeDiscovery::new();
     let result = discovery.find_best_runtime();
@@ -63,7 +63,7 @@ mod integration_tests {
         println!("  Version: {}", info.version);
       }
       Err(e) => {
-        println!("No runtime found: {}", e);
+        println!("No runtime found: {e}");
         // 如果系统没有安装任何运行时，测试应该失败
         panic!("Expected at least one runtime to be installed");
       }
@@ -71,7 +71,7 @@ mod integration_tests {
   }
 
   #[test]
-  #[ignore]
+  #[ignore = "requires actual runtime environment"]
   fn test_spawn_simple_process() {
     use std::collections::HashMap;
 
@@ -96,7 +96,7 @@ mod integration_tests {
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     let is_running = process.is_running();
-    println!("Process running after 500ms: {}", is_running);
+    println!("Process running after 500ms: {is_running}");
 
     // 清理
     process.kill().ok();
@@ -104,7 +104,7 @@ mod integration_tests {
   }
 
   #[test]
-  #[ignore]
+  #[ignore = "requires actual runtime environment and config-bridge built"]
   fn test_process_with_config_bridge() {
     use std::{
       collections::HashMap,
@@ -139,7 +139,7 @@ mod integration_tests {
     .expect("Failed to write config");
 
     if !bridge_script.exists() {
-      println!("Skipping test: bridge script not found at {:?}", bridge_script);
+      println!("Skipping test: bridge script not found at {bridge_script:?}");
       return;
     }
 
@@ -158,14 +158,14 @@ mod integration_tests {
 
     // 发送 JSON-RPC 请求
     let request = r#"{"jsonrpc":"2.0","id":1,"method":"config.get","params":{}}"#;
-    println!("Sending request: {}", request);
+    println!("Sending request: {request}");
 
     process.send(request).expect("Failed to send request");
 
     // 读取响应
     if let Some(stdout) = process.stdout_mut() {
       let mut response = String::new();
-      if let Ok(_) = stdout.read_line(&mut response) {
+      if stdout.read_line(&mut response).is_ok() {
         println!("Received response: {}", response.trim());
 
         // 简单验证响应格式

@@ -42,7 +42,7 @@ async function main() {
 }
 
 // 启动
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error('Fatal error:', error)
   process.exit(1)
 })

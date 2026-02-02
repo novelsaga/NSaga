@@ -20,7 +20,8 @@ class DenoErrorHandler implements ErrorHandler {
   ): void {
     // Deno 使用全局事件监听器
     globalThis.addEventListener('error', (event) => {
-      onError(event.error || new Error(event.message), 'uncaught')
+      const error = event.error instanceof Error ? event.error : new Error(event.message)
+      onError(error, 'uncaught')
       onExit(1)
     })
 

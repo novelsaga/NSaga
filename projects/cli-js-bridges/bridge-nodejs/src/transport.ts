@@ -57,7 +57,7 @@ export class StdioTransport implements Transport {
   private handleMessage(message: string): void {
     for (const handler of this.messageHandlers) {
       try {
-        handler(message)
+        void handler(message)
       } catch (error) {
         console.error('Error in message handler:', error)
       }

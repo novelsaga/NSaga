@@ -1,12 +1,9 @@
 /**
- * Service 抽象接口 - 定义 RPC 服务的方法
+ * Service interface for RPC method dispatch
  */
 
-/**
- * Service 接口
- *
- * 服务类必须实现索引签名，允许动态方法调用
- */
+export type ServiceMethod = (params: unknown) => unknown
+
 export interface Service {
-  [method: string]: any
+  [method: string]: ServiceMethod | undefined
 }

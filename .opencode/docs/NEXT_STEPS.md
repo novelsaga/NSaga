@@ -5,11 +5,12 @@
 
 ---
 
-## 📊 当前进度总览
+## 当前进度总览
 
 ### ✅ 已完成的核心功能
 
 #### Stage 4: Bridge Manager (2026-01-26 完成)
+
 - ✅ JSON-RPC 2.0 通信层（Transport + RPC Client）
 - ✅ 运行时管理（Node.js/Bun/Deno 发现和进程管理）
 - ✅ Bridge 管理器（懒加载、重试、线程安全）
@@ -17,12 +18,14 @@
 - ✅ 内存安全重构（`Arc<Mutex<Box<dyn Bridge>>>` 架构）
 
 #### Stage 5: Config Loader (2026-01-26 完成)
+
 - ✅ ConfigLoader 实现（配置查找和加载）
 - ✅ CLI 集成（js_loader/ts_loader 闭包）
 - ✅ E2E 测试框架（xtask test module）
 - ✅ 多格式支持（.mjs/.ts/.cjs）
 
 #### P1.1: 代码质量改进 (2026-01-26 完成)
+
 - ✅ **常量复用**：消除硬编码，统一使用 core 的常量定义
   - 文件扩展名：`CONFIG_FILE_NAMES`, `NovelSagaFileFormat::get_extensions()`
   - 环境变量：`env_keys::*` 模块（Rust + JS 双端同步）
@@ -33,19 +36,21 @@
   - TypeScript 测试使用真实的 TS 语法（interface、类型注解）
 
 **测试状态**:
+
 - ✅ 单元测试：Bridge Manager、ConfigBridge
 - ✅ 集成测试：`test_bridge_manager`
 - ✅ E2E 测试：`./xtask.sh e2e` (14 个场景全部通过)
 
 ---
 
-## 📝 今天完成的工作总结 (2026-02-02)
+## 今天完成的工作总结 (2026-02-02)
 
 ### ✅ P0 - 构建验证与 Nix 构建支持 (已完成)
 
 **Nix 构建完整支持**:
 
 #### 1. **xtask 新增 `--skip-js` 和 `--copy-only` 参数**
+
 - `./xtask.sh cli --skip-js` - 跳过 JS 构建，只构建 CLI
 - `./xtask.sh cli-all --skip-js` - 跳过 JS 构建，只构建所有平台 CLI
 - `./xtask.sh build-all --skip-js` - 跳过 JS 构建，构建所有产物
@@ -54,12 +59,15 @@
 **用途**: Nix 构建中手动构建 JS 后，可使用 `--skip-js` 避免重复构建
 
 #### 2. **Nix Bundle 包 (`nix build .#bundle`)**
+
 **依赖管理**:
+
 - 使用 `fetchPnpmDeps` 预取 npm 依赖（需要 hash）
 - 添加 `pkgs.pnpm`, `pkgs.nodejs`, `pkgs.deno` 到 `nativeBuildInputs`
 - `pnpmConfigHook` 自动安装依赖到 `node_modules`
 
 **构建流程**:
+
 1. `pnpmConfigHook` 安装 JS 依赖（离线，使用预取的依赖）
 2. 手动运行 `node build.mts` 构建每个 bridge（避免 pnpm 自我更新触发网络请求）
    - `bridge-deno/build.mts` 自动生成 `deno.d.ts`（调用 `deno types`）
@@ -68,6 +76,7 @@
 5. 安装到 `$out/share/novelsaga/{cli,wasm,so}/`
 
 **产物结构**:
+
 ```
 result/share/novelsaga/
 ├── cli/
@@ -85,9 +94,11 @@ result/share/novelsaga/
 ```
 
 #### 3. **Nix Default 包 (`nix build` 或 `nix build .#cli`)**
+
 **特点**: 只构建 CLI，产物更轻量
 
 **构建流程**:
+
 1. 使用 nightly Rust toolchain（支持 `#![feature(mpmc_channel)]`）
 2. `pnpmConfigHook` 安装 JS 依赖
 3. `preBuild`: 手动构建所有 JS bridges
@@ -95,6 +106,7 @@ result/share/novelsaga/
 5. `postInstall`: 复制 JS assets 到 `$out/share/novelsaga/assets/js/dist/`
 
 **产物结构**:
+
 ```
 result/
 ├── bin/
@@ -109,12 +121,14 @@ result/
 ```
 
 **验证结果**:
+
 - ✅ `nix build .#bundle` 成功构建所有平台产物
 - ✅ `nix build` 或 `nix build .#cli` 成功构建单平台 CLI
 - ✅ JS assets 正确复制到输出目录
 - ✅ 所有构建在 Nix 沙盒中完成（无网络访问）
 
 **pnpmDeps hash 更新流程**:
+
 ```bash
 # 1. 修改 hash 为占位符
 hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -132,6 +146,7 @@ nix build .#bundle 2>&1 | grep "got:"
 **解决方案**: 创建统一的构建工具包 `@nsaga/build-tool`
 
 **实施内容**:
+
 1. **创建 build-tool 包** (`projects/cli-js-bridges/build-tool/`):
    - `buildBridge()` 函数提供统一构建接口
    - 支持选项：
@@ -157,110 +172,30 @@ nix build .#bundle 2>&1 | grep "got:"
    - pnpm workspace 自动包含（`projects/cli-js-bridges/*`）
 
 **重构效果**:
+
 - ✅ 消除了约 **180 行重复代码**
 - ✅ 统一的构建逻辑，易于维护
 - ✅ 支持灵活的扩展（hooks + overrides）
 - ✅ 所有构建测试通过：`./xtask.sh build-js` ✅
 
 **代码示例**:
+
 ```typescript
 // 旧代码：50+ 行 esbuild 配置和错误处理
 // 新代码：
-import { buildBridge } from "@nsaga/build-tool";
+import { buildBridge } from '@nsaga/build-tool'
 buildBridge({
-  name: "bridge-bun",
+  name: 'bridge-bun',
   rootDir: __dirname,
-  entryPoints: ["src/transport.ts", "src/index.ts"],
-});
+  entryPoints: ['src/transport.ts', 'src/index.ts'],
+})
 ```
 
 ---
 
-## 📝 历史工作总结 (2026-02-01)
+## 接下来的工作计划 (2026-02-03 起)
 
-### ✅ P1.1.3 - Build-All Integration (已完成)
-
-**问题分析**:
-- `build-all` 和 `cli-all` 在构建 CLI 前未自动调用 `build-js`
-- `cli::build_all()` 先构建 JS → 然后删除整个 out/cli 目录 → assets 被意外删除
-- `out/cli/assets/` 目录中缺少 JS bridge 产物
-
-**修复内容**:
-1. **调用顺序优化**: `cli::build_all()` 调整为：
-   - 先清理 `out/cli/` 目录
-   - 再调用 `build_all()` 构建 JS 并自动复制 assets
-   - 最后构建各平台 CLI 二进制
-2. **自动复制**: `build_all()` 新增 `copy_assets_to_out()` 函数
-   - 从 `projects/cli/assets/js/dist/` 复制到 `out/cli/assets/js/dist/`
-3. **单次调用**: `cli-all` 任务确保在开头只调用一次 `build-js`
-4. **自动触发**: `build-single` 和 `build-all` 都会在构建前自动调用 `build-js`
-
-**验证结果**:
-- ✅ `./xtask.sh build-js` 正确复制 assets 到 `out/cli/assets/js/dist/`
-- ✅ `out/cli/assets/js/dist/config-bridge.js` 和 `package.json` 存在
-- ✅ `cli-all` 任务不会删除已复制的 assets
-
----
-
-## 📝 历史工作总结 (2026-01-27)
-
-### ✅ P1.1.1 - 用户指定运行时路径 (已完成)
-- CLI 参数支持：`--runtime`, `--node-path`, `--bun-path`, `--deno-path`
-- ConfigLoader 集成 RuntimeDiscovery
-- 测试覆盖：E2E 测试全部通过
-
-### ✅ P1.1.2 - JS Bridge 自动构建 (已完成)
-- xtask build-js：增量构建 + mtime 检测
-- 集成到 E2E 测试流程
-- 输出目录：`projects/cli/assets/js/dist/`
-
-### ✅ P1.1.3 - Build-All Integration (已完成 - 2026-02-01)
-**修复内容**:
-1. **调用顺序优化**: `cli::build_all()` 调整为先清理 → 构建 JS → 构建 CLI（避免删除刚复制的 assets）
-2. **自动复制**: `build_all()` 自动将 JS 产物从 `projects/cli/assets/js/dist/` 复制到 `out/cli/assets/js/dist/`
-3. **单次调用**: `cli-all` 任务确保在开头只调用一次 `build-js`
-4. **自动触发**: `build-single` 和 `build-all` 都会在构建前自动调用 `build-js`
-
-**验证结果**:
-- ✅ `./xtask.sh build-js` 正确复制 assets 到 `out/cli/assets/js/dist/`
-- ✅ `./xtask.sh cli-all` 不会删除已复制的 assets
-- ✅ Assets 在开发和生产环境都能正确被找到
-
-### ✅ P1.1.4 - 清理废弃测试 (已完成)
-- 9 个单元测试改用 tempfile
-- 删除 `projects/cli/assets/test/`
-
-### ✅ P1.1.5 - JS 源码目录重构 (已完成 - 最终修正)
-**架构调整**:
-1. **源码分离**: JS 源码移动到 `projects/cli-js-bridges/` (删除 `src` 中间层，保持独立性和清晰度)
-2. **产物集成**: 编译产物输出回 `projects/cli/assets/js/dist/` (保持 CLI 资源完整性)
-3. **定位器优化**: `AssetLocator` 重构为指向 `assets` 根目录，调用方指定相对路径 `js/dist/xxx`
-4. **路径修复**: 修正了 TS 配置文件引用，并对齐开发环境和生产环境的资源查找逻辑
-
-**最终结构**:
-- Src: `projects/cli-js-bridges/config-bridge/`
-- Dist: `projects/cli/assets/js/dist/config-bridge.js`
-- Install: `~/.cache/novelsaga/assets/<version>/js/dist/config-bridge.js` (自动从二进制解压)
-
-**验证结果**:
-- ✅ `build-js` 正确输出到 assets 目录
-- ✅ 单元测试全部通过
-- ✅ Release 模式下资源自动内嵌并解压
-
-## 🎯 历史完成记录
-
-完整历史记录请参见：[COMPLETED_TASKS.md](COMPLETED_TASKS.md)
-
-- P1.3 静态配置格式支持 (Done)
-- P1.1.4 清理废弃测试 (Done)
-- P1.1.2 JS Bridge 自动构建 (Done)
-- P1.1.1 用户指定运行时 (Done)
-
----
-
-## 📅 接下来的工作计划 (2026-02-03 起)
-
-### 第 1 步：代码清理与规范化 (P0 必须完成) ⭐⭐⭐
+### 第 1 步：代码清理与规范化 (P0 必须完成)
 
 **任务清单**:
 
@@ -304,7 +239,7 @@ buildBridge({
 
 ---
 
-## 📅 已完成的里程碑
+## 已完成的里程碑
 
 ### ✅ 构建验证 (2026-02-02)
 
@@ -325,7 +260,7 @@ buildBridge({
 
 ---
 
-## 🧊 暂缓任务 (已移至 BACKLOG.md)
+## 暂缓任务 (已移至 BACKLOG.md)
 
 以下非紧急任务已移出当前迭代:
 
@@ -336,7 +271,7 @@ buildBridge({
 
 ---
 
-## 🎯 历史完成记录
+## 历史完成记录
 
 完整历史记录请参见：[COMPLETED_TASKS.md](COMPLETED_TASKS.md)
 
@@ -344,96 +279,3 @@ buildBridge({
 - P1.1.4 清理废弃测试 (Done)
 - P1.1.2 JS Bridge 自动构建 (Done)
 - P1.1.1 用户指定运行时 (Done)
-
-
-### 任务 4.1: 用户文档 (3-4h)
-**位置**: `docs/CONFIG_GUIDE.md`
-
-**内容**:
-- [ ] 配置文件格式完整说明
-- [ ] JS/TS 配置示例（静态 vs 函数式）
-- [ ] 配置优先级规则
-- [ ] 常见问题排查
-
-### 任务 4.2: 开发者文档 (2-3h)
-**位置**: `docs/BRIDGE_DEVELOPMENT.md`
-
-**内容**:
-- [ ] Bridge 架构说明
-- [ ] 如何添加新的 Bridge（plugin-bridge 示例）
-- [ ] 运行时适配指南
-- [ ] 调试技巧
-
----
-
-## ⏱️ 时间预估总结
-
-| 优先级 | 任务 | 预估时间 | 推荐程度 |
-|--------|------|---------|---------|
-| **P1** | 代码质量和稳定性 | **7h** | ⭐⭐⭐ 强烈推荐 |
-| P2 | 稳健性增强 | 7-10h | ⭐⭐ 建议做 |
-| P3 | 性能优化 | 1-2h | ⭐ 可选 |
-| 文档 | 用户+开发者文档 | 5-7h | ⭐ 可选 |
-| **总计** | | **20-26h** | |
-
----
-
-## 🎯 推荐执行顺序
-
-### 第 1 步：P1 代码质量（必做）
-1. ~~**清理警告**~~ → **完成剩余清理** (4h) - 集成用户路径、JS 自动构建、生产环境支持
-2. **改进错误消息** (3h) - 提升用户体验
-3. ~~**静态配置支持**~~ ✅ Core 已实现
-
-**预期成果**: 生产可用的基础版本
-
----
-
-### 第 2 步：P2 稳健性（建议做）
-根据实际需求选择：
-- 如果需要长时间运行 → 优先做 **超时机制**
-- 如果用户反馈问题难排查 → 优先做 **崩溃日志**
-- 如果需要开发时快速迭代 → 优先做 **热重载**
-
-**预期成果**: 企业级稳定性
-
----
-
-### 第 3 步：P3 性能优化（可选）
-如果用户抱怨启动慢 → 做 **Bridge 预热**
-~~配置缓存~~ → Core 已实现
-
-**预期成果**: 极致性能体验
-
----
-
-## 📝 下一步行动建议
-
-**建议从 P1.2 开始**（改进错误消息）：
-- 用户体验影响最大
-- 后续开发和调试都会受益
-- 实现相对简单，成就感强
-
-**立即行动**:
-```bash
-# 查看当前警告
-cargo check -p novelsaga-cli
-
-# 开始改进错误消息
-code projects/cli/src/bridge/error.rs
-```
-
----
-
-## 🤔 需要确认的问题
-
-在开始下一步工作前，需要明确：
-
-1. **优先级确认**：先完成 P1.1 剩余清理（4h）还是直接做 P1.2 改进错误消息？
-   - P1.1 剩余：更实用，解决生产部署和用户自定义运行时问题
-   - P1.2：更有成就感，用户体验提升明显
-2. ~~静态配置~~：Core 已实现，无需额外工作
-3. **运行时选择**：集成 `--runtime`, `--node-path` 等参数（P1.1.1 会处理）
-4. **文档需求**：是否需要优先编写用户文档？
-
-**建议**: 先做 P1.1 剩余清理（实用优先），再做 P1.2（体验优化）🚀

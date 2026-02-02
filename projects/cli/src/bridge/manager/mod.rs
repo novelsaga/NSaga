@@ -21,6 +21,9 @@ use crate::bridge::{
 /// Bridge 工厂函数类型
 pub type BridgeFactory = Box<dyn Fn() -> Result<Box<dyn Bridge>> + Send>;
 
+/// Bridge 实例的线程安全包装类型
+type BridgeInstance = Arc<Mutex<Box<dyn Bridge>>>;
+
 /// Bridge 管理器
 ///
 /// 负责管理多个 Bridge 实例的生命周期
@@ -28,17 +31,13 @@ pub type BridgeFactory = Box<dyn Fn() -> Result<Box<dyn Bridge>> + Send>;
 /// - 自动重试：失败时自动重试创建
 /// - 线程安全：使用 Arc<Mutex<>> 保证并发安全
 pub struct BridgeManager {
-  /// Bridge 实例缓存（name -> Bridge）
-  /// 使用 Arc<Mutex<Box<dyn Bridge>>> 允许并发访问不同 Bridge，且避免 unsafe 复制
-  bridges: Arc<Mutex<HashMap<String, Arc<Mutex<Box<dyn Bridge>>>>>>,
-  /// Bridge 工厂函数（name -> Factory）
+  bridges: Arc<Mutex<HashMap<String, BridgeInstance>>>,
   factories: Arc<Mutex<HashMap<String, BridgeFactory>>>,
-  /// 最大重试次数
   max_retries: u32,
 }
 
 impl BridgeManager {
-  /// 创建新的 BridgeManager
+  /// 创建新的 `BridgeManager`
   #[must_use]
   pub fn new() -> Self {
     Self {
@@ -91,7 +90,7 @@ impl BridgeManager {
   }
 
   /// 获取或创建 Bridge（懒加载 + 重试）
-  fn get_or_create_bridge(&self, name: &str) -> Result<Arc<Mutex<Box<dyn Bridge>>>> {
+  fn get_or_create_bridge(&self, name: &str) -> Result<BridgeInstance> {
     let mut bridges = self.bridges.lock().unwrap();
 
     // 如果已存在且健康，直接返回
@@ -104,10 +103,9 @@ impl BridgeManager {
 
       if is_healthy {
         return Ok(Arc::clone(bridge_arc));
-      } else {
-        // Bridge 不健康，移除它
-        bridges.remove(name);
       }
+      // Bridge 不健康，移除它
+      bridges.remove(name);
     }
 
     // 如果不存在，创建新的 Bridge
@@ -176,11 +174,7 @@ impl BridgeManager {
   }
 
   /// 关闭所有 Bridge
-  ///
-  /// # Errors
-  ///
-  /// 任何 Bridge 关闭失败
-  pub fn shutdown_all(&self) -> Result<()> {
+  pub fn shutdown_all(&self) {
     let mut bridges = self.bridges.lock().unwrap();
     let names: Vec<String> = bridges.keys().cloned().collect();
 
@@ -192,8 +186,6 @@ impl BridgeManager {
         }
       }
     }
-
-    Ok(())
   }
 
   /// 获取已注册的 Bridge 数量
@@ -237,9 +229,10 @@ mod tests {
   };
 
   fn get_workspace_root() -> PathBuf {
-    std::env::var("CARGO_MANIFEST_DIR")
-      .map(|p| PathBuf::from(p).parent().unwrap().parent().unwrap().to_path_buf())
-      .unwrap_or_else(|_| PathBuf::from("."))
+    std::env::var("CARGO_MANIFEST_DIR").map_or_else(
+      |_| PathBuf::from("."),
+      |p| PathBuf::from(p).parent().unwrap().parent().unwrap().to_path_buf(),
+    )
   }
 
   #[test]

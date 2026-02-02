@@ -205,14 +205,12 @@ pub fn run_e2e_tests() -> Result<()> {
   for runtime in &available_runtimes {
     for config_type in &config_types {
       // Node.js < 23.6 不原生支持 TypeScript
-      if config_type.requires_typescript() && matches!(runtime, Runtime::Node) {
-        if !is_node_ts_supported() {
-          let test_name = format!("{} + {}", runtime.display_name(), config_type.display_name());
-          print!("📝 Test: {} ... ", test_name);
-          println!("⊘ (Skipped: Node.js < 23.6)");
-          skipped += 1;
-          continue;
-        }
+      if config_type.requires_typescript() && matches!(runtime, Runtime::Node) && !is_node_ts_supported() {
+        let test_name = format!("{} + {}", runtime.display_name(), config_type.display_name());
+        print!("📝 Test: {} ... ", test_name);
+        println!("⊘ (Skipped: Node.js < 23.6)");
+        skipped += 1;
+        continue;
       }
 
       let test_name = format!("{} + {}", runtime.display_name(), config_type.display_name());
@@ -263,7 +261,7 @@ where
 fn ensure_cli_built() -> Result<()> {
   println!("🔨 Building CLI...");
   let status = Command::new("cargo")
-    .args(&["build", "-p", "novelsaga-cli"])
+    .args(["build", "-p", "novelsaga-cli"])
     .status()
     .context("Failed to run cargo build")?;
 
@@ -366,7 +364,7 @@ fn test_error_scenarios() -> Result<()> {
 
 fn get_workspace_root() -> Result<PathBuf> {
   let output = Command::new("cargo")
-    .args(&["locate-project", "--workspace", "--message-format=plain"])
+    .args(["locate-project", "--workspace", "--message-format=plain"])
     .output()
     .context("Failed to locate workspace")?;
 
@@ -415,7 +413,7 @@ fn get_node_version() -> Result<(u32, u32, u32)> {
   let parts: Vec<u32> = version_str.split('.').take(3).map(|s| s.parse().unwrap_or(0)).collect();
 
   Ok((
-    parts.get(0).copied().unwrap_or(0),
+    parts.first().copied().unwrap_or(0),
     parts.get(1).copied().unwrap_or(0),
     parts.get(2).copied().unwrap_or(0),
   ))

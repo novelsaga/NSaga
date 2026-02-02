@@ -164,6 +164,13 @@
               pass_filenames = false;
               language = "system";
             };
+            eslint = {
+              enable = true;
+              settings = {
+                binPath = "${devenv-root-path}/node_modules/.bin/eslint";
+                extensions = "\.ts|\.cts|\.mts$";
+              };
+            };
             treefmt = {
               enable = true;
               packageOverrides = {

@@ -10,7 +10,7 @@ use std::{
 use crate::bridge::error::{BridgeError, Result};
 
 /// JavaScript 运行时类型
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeType {
   /// Node.js 运行时
   NodeJs,
@@ -20,6 +20,7 @@ pub enum RuntimeType {
   Deno,
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)]
 impl RuntimeType {
   /// 获取运行时可执行文件名（不含扩展名）
   pub fn executable_name(&self) -> &str {
@@ -61,26 +62,24 @@ impl RuntimeInfo {
     match self.runtime_type {
       RuntimeType::NodeJs => {
         // 解析版本号，检查是否 ≥23.6
-        if let Some(version) = self.version.strip_prefix('v') {
-          if let Some((major, rest)) = version.split_once('.') {
-            if let Ok(major_num) = major.parse::<u32>() {
-              if major_num > 23 {
-                return true;
-              }
-              if major_num == 23 {
-                if let Some((minor, _)) = rest.split_once('.') {
-                  if let Ok(minor_num) = minor.parse::<u32>() {
-                    return minor_num >= 6;
-                  }
-                }
-              }
-            }
+        if let Some(version) = self.version.strip_prefix('v')
+          && let Some((major, rest)) = version.split_once('.')
+          && let Ok(major_num) = major.parse::<u32>()
+        {
+          if major_num > 23 {
+            return true;
+          }
+          if major_num == 23
+            && let Some((minor, _)) = rest.split_once('.')
+            && let Ok(minor_num) = minor.parse::<u32>()
+          {
+            return minor_num >= 6;
           }
         }
         false
       }
-      RuntimeType::Bun => true,  // Bun 原生支持 TypeScript
-      RuntimeType::Deno => true, // Deno 原生支持 TypeScript
+      // Bun and Deno both natively support TypeScript
+      RuntimeType::Bun | RuntimeType::Deno => true,
     }
   }
 
@@ -96,13 +95,12 @@ impl RuntimeInfo {
     match self.runtime_type {
       RuntimeType::NodeJs => {
         // Node.js ≥23.6 支持 TypeScript
-        if script_path.extension().and_then(|s| s.to_str()) == Some("ts")
+        if (script_path.extension().and_then(|s| s.to_str()) == Some("ts")
           || script_path.extension().and_then(|s| s.to_str()) == Some("mts")
-          || script_path.extension().and_then(|s| s.to_str()) == Some("cts")
+          || script_path.extension().and_then(|s| s.to_str()) == Some("cts"))
+          && self.supports_native_typescript()
         {
-          if self.supports_native_typescript() {
-            args.push("--experimental-strip-types".to_string());
-          }
+          args.push("--experimental-strip-types".to_string());
         }
         args.push(script_path.to_string_lossy().to_string());
       }
@@ -126,6 +124,7 @@ impl RuntimeInfo {
 #[derive(Clone, Copy)]
 pub struct RuntimeDiscovery;
 
+#[allow(clippy::unused_self, clippy::trivially_copy_pass_by_ref)]
 impl RuntimeDiscovery {
   /// 创建运行时发现器
   pub fn new() -> Self {
@@ -152,16 +151,15 @@ impl RuntimeDiscovery {
   ) -> Result<Option<RuntimeInfo>> {
     // 如果用户提供了路径，优先使用
     if let Some(path) = user_path {
-      if let Some(version) = self.get_version(&path)? {
+      if let Some(version) = Self::get_version(&path)? {
         return Ok(Some(RuntimeInfo {
-          runtime_type: runtime_type.clone(),
+          runtime_type,
           path,
           version,
         }));
-      } else {
-        // 用户指定的路径无效
-        return Ok(None);
       }
+      // 用户指定的路径无效
+      return Ok(None);
     }
 
     let executable = runtime_type.executable_filename();
@@ -174,29 +172,29 @@ impl RuntimeDiscovery {
 
     let output = Command::new(which_cmd).arg(&executable).output();
 
-    if let Ok(output) = output {
-      if output.status.success() {
-        let path_str = String::from_utf8_lossy(&output.stdout);
-        let path = path_str.lines().next().unwrap_or("").trim();
+    if let Ok(output) = output
+      && output.status.success()
+    {
+      let path_str = String::from_utf8_lossy(&output.stdout);
+      let path = path_str.lines().next().unwrap_or("").trim();
 
-        if !path.is_empty() {
-          let path_buf = PathBuf::from(path);
-          if let Some(version) = self.get_version(&path_buf)? {
-            return Ok(Some(RuntimeInfo {
-              runtime_type: runtime_type.clone(),
-              path: path_buf,
-              version,
-            }));
-          }
+      if !path.is_empty() {
+        let path_buf = PathBuf::from(path);
+        if let Some(version) = Self::get_version(&path_buf)? {
+          return Ok(Some(RuntimeInfo {
+            runtime_type,
+            path: path_buf,
+            version,
+          }));
         }
       }
     }
 
     // 如果 which/where 失败，尝试直接执行（依赖 PATH）
     let executable_path = PathBuf::from(&executable);
-    if let Some(version) = self.get_version(&executable_path)? {
+    if let Some(version) = Self::get_version(&executable_path)? {
       return Ok(Some(RuntimeInfo {
-        runtime_type: runtime_type.clone(),
+        runtime_type,
         path: executable_path,
         version,
       }));
@@ -266,8 +264,7 @@ impl RuntimeDiscovery {
 
       self.find_runtime_with_path(runtime_type, user_path)?.ok_or_else(|| {
         BridgeError::Other(format!(
-          "{} runtime not found. Please install it or use --runtime auto",
-          runtime_name
+          "{runtime_name} runtime not found. Please install it or use --runtime auto"
         ))
       })
     } else {
@@ -277,7 +274,7 @@ impl RuntimeDiscovery {
   }
 
   /// 获取运行时版本
-  fn get_version(&self, path: &Path) -> Result<Option<String>> {
+  fn get_version(path: &Path) -> Result<Option<String>> {
     let output = Command::new(path).arg("--version").output();
 
     match output {

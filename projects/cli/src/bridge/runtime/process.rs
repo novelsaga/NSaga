@@ -114,16 +114,16 @@ impl RuntimeProcess {
   }
 
   /// 获取进程 ID
-  pub fn pid(&self) -> Option<u32> {
-    Some(self.child.id())
+  pub fn pid(&self) -> u32 {
+    self.child.id()
   }
 
   /// 检查进程是否仍在运行
   pub fn is_running(&mut self) -> bool {
     match self.child.try_wait() {
-      Ok(None) => true,     // 进程仍在运行
-      Ok(Some(_)) => false, // 进程已退出
-      Err(_) => false,      // 出错，假设已退出
+      Ok(None) => true, // 进程仍在运行
+      // Process exited or error - assume not running
+      Ok(Some(_)) | Err(_) => false,
     }
   }
 
@@ -201,7 +201,7 @@ impl RuntimeProcess {
     Ok(())
   }
 
-  /// 检查进程是否存活（is_running 的别名，用于一致性）
+  /// `检查进程是否存活（is_running` 的别名，用于一致性）
   pub fn is_alive(&mut self) -> bool {
     self.is_running()
   }
@@ -225,7 +225,7 @@ mod tests {
   use crate::bridge::runtime::{RuntimeDiscovery, RuntimeType};
 
   #[test]
-  #[ignore] // 需要实际运行时环境
+  #[ignore = "requires actual runtime environment"]
   fn test_spawn_and_kill() {
     let discovery = RuntimeDiscovery::new();
     let runtime = discovery
@@ -241,7 +241,6 @@ mod tests {
     let mut process = RuntimeProcess::spawn(runtime, &test_script, env).expect("Failed to spawn");
 
     assert!(process.is_running());
-    assert!(process.pid().is_some());
 
     process.kill().expect("Failed to kill");
     assert!(!process.is_running());
@@ -251,7 +250,7 @@ mod tests {
   }
 
   #[test]
-  #[ignore]
+  #[ignore = "requires actual runtime environment"]
   fn test_send_data() {
     let discovery = RuntimeDiscovery::new();
     let runtime = discovery
@@ -263,11 +262,11 @@ mod tests {
     let test_script = std::env::temp_dir().join("test_echo.js");
     std::fs::write(
       &test_script,
-      r#"
+      r"
         const readline = require('readline');
         const rl = readline.createInterface({ input: process.stdin });
         rl.on('line', line => console.log('Received: ' + line));
-      "#,
+      ",
     )
     .expect("Failed to write test script");
 
@@ -286,7 +285,7 @@ mod tests {
   }
 
   #[test]
-  #[ignore]
+  #[ignore = "requires actual runtime environment"]
   fn test_shutdown_graceful() {
     let discovery = RuntimeDiscovery::new();
     let runtime = discovery
@@ -298,13 +297,13 @@ mod tests {
     let test_script = std::env::temp_dir().join("test_graceful.js");
     std::fs::write(
       &test_script,
-      r#"
+      r"
         process.stdin.on('end', () => {
           console.log('stdin closed, exiting...');
           process.exit(0);
         });
         process.stdin.resume();
-      "#,
+      ",
     )
     .expect("Failed to write test script");
 

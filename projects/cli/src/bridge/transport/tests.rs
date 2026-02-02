@@ -1,7 +1,7 @@
 //! Transport 层集成测试
 //!
-//! 这些测试需要真实的 config-bridge 进程，因此标记为 #[ignore]
-//! 手动运行: cargo test --package novelsaga-cli bridge::transport::tests -- --nocapture --ignored
+//! 这些测试需要真实的 `config-bridge` 进程，因此标记为 `#[ignore]`
+//! 手动运行: `cargo test --package novelsaga-cli bridge::transport::tests -- --nocapture --ignored`
 
 #[cfg(test)]
 mod integration_tests {

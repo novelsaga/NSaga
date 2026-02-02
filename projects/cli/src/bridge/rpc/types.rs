@@ -1,6 +1,6 @@
 //! JSON-RPC 2.0 类型定义
 //!
-//! 参考规范: https://www.jsonrpc.org/specification
+//! 参考规范: <https://www.jsonrpc.org/specification>
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

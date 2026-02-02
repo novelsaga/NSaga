@@ -1,0 +1,19 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "serayuzgur.crates",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "usernamehw.errorlens",
+    "mkhl.direnv",
+    "jnoortheen.nix-ide",
+    "Continue.continue",
+    "GitHub.copilot",
+    "folke.vscode-monorepo-workspace",
+    "eamodio.gitlens",
+    "christian-kohler.path-intellisense",
+    "streetsidesoftware.code-spell-checker"
+  ],
+  "unwantedRecommendations": ["rust-lang.rust"]
+}

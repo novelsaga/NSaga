@@ -17,14 +17,21 @@ interface GlobalSettings {
   VERBOSE_LOG: boolean
 }
 
-/**
- * 配置服务
- */
+type ConfigFactory = (settings: GlobalSettings) => NovelSagaConfig
+
+interface ConfigModule {
+  default?: NovelSagaConfig | ConfigFactory
+  [key: string]: unknown
+}
+
+type AnyMethod = (params: unknown) => unknown
+
 export class ConfigService implements Service {
-  private settings: GlobalSettings
+  private settings: GlobalSettings;
+
+  [method: string]: AnyMethod | undefined | GlobalSettings
 
   constructor() {
-    // 从环境变量读取配置
     this.settings = {
       CONFIG_IS_COMMONJS: process.env[ENV_KEYS.CONFIG_IS_COMMONJS] === 'true',
       CONFIG_IS_TYPESCRIPT: process.env[ENV_KEYS.CONFIG_IS_TYPESCRIPT] === 'true',
@@ -35,34 +42,21 @@ export class ConfigService implements Service {
     }
   }
 
-  // 添加索引签名以符合 Service 接口
-  [method: string]: any
-
-  /**
-   * 获取配置
-   */
   async get(): Promise<NovelSagaConfig> {
     if (!this.settings.CONFIG_PATH) {
       throw new Error('CONFIG_PATH not defined')
     }
 
-    // 动态导入配置文件
-    const configModule = await import(this.settings.CONFIG_PATH)
+    const configModule = (await import(this.settings.CONFIG_PATH)) as ConfigModule
 
-    // 处理 CommonJS 和 ESM 导出
-    // Node.js: CJS 通过 import() 会返回 { default: module.exports }
-    // Bun: 可能直接返回 module.exports 或 { default: ... }
-    let configMain: NovelSagaConfig | ((settings: GlobalSettings) => NovelSagaConfig)
+    let configMain: NovelSagaConfig | ConfigFactory
 
     if (this.settings.CONFIG_IS_COMMONJS) {
-      // CJS: 尝试 .default (Node.js) 或直接使用 (Bun)
-      configMain = configModule.default || configModule
+      configMain = (configModule.default ?? configModule) as NovelSagaConfig | ConfigFactory
     } else {
-      // ESM: 使用 .default 或回退到整个模块
-      configMain = configModule.default || configModule
+      configMain = (configModule.default ?? configModule) as NovelSagaConfig | ConfigFactory
     }
 
-    // 如果是函数，调用它
     let config: NovelSagaConfig
     if (typeof configMain === 'function') {
       config = configMain(this.settings)
@@ -70,14 +64,10 @@ export class ConfigService implements Service {
       config = configMain
     }
 
-    // 过滤掉所有函数，确保可以序列化
-    return this.sanitizeConfig(config)
+    return this.sanitizeConfig(config) as NovelSagaConfig
   }
 
-  /**
-   * 净化配置，移除不可序列化的内容
-   */
-  private sanitizeConfig(obj: unknown): any {
+  private sanitizeConfig(obj: unknown): unknown {
     if (obj === null || obj === undefined) {
       return obj
     }
@@ -87,11 +77,11 @@ export class ConfigService implements Service {
     }
 
     if (Array.isArray(obj)) {
-      return obj.map((item) => this.sanitizeConfig(item)).filter((item) => item !== undefined)
+      return obj.map((item: unknown) => this.sanitizeConfig(item)).filter((item) => item !== undefined)
     }
 
     if (typeof obj === 'object') {
-      const result: any = {}
+      const result: Record<string, unknown> = {}
       for (const [key, value] of Object.entries(obj)) {
         const sanitized = this.sanitizeConfig(value)
         if (sanitized !== undefined) {

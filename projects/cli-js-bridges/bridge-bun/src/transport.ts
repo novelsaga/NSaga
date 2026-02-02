@@ -11,8 +11,7 @@ export class StdioTransport implements Transport {
   private buffer = ''
 
   constructor() {
-    // 使用 Bun 原生 API 读取 stdin
-    this.startReading()
+    void this.startReading()
   }
 
   /**
@@ -57,8 +56,7 @@ export class StdioTransport implements Transport {
    */
   send(message: RPCResponse): void {
     const json = JSON.stringify(message)
-    // 使用 Bun.write 直接写入 stdout
-    Bun.write(Bun.stdout, json + '\n')
+    void Bun.write(Bun.stdout, json + '\n')
   }
 
   /**
@@ -74,7 +72,7 @@ export class StdioTransport implements Transport {
   private handleMessage(message: string): void {
     for (const handler of this.messageHandlers) {
       try {
-        handler(message)
+        void handler(message)
       } catch (error) {
         console.error('Error in message handler:', error)
       }

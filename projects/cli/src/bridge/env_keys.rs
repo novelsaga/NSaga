@@ -12,7 +12,7 @@ pub const PROJECT_ROOT: &str = "NSAGA_CLI_PROJECT_ROOT";
 /// Whether the config file is TypeScript (true/false)
 pub const CONFIG_IS_TYPESCRIPT: &str = "NSAGA_CLI_CONFIG_IS_TYPESCRIPT";
 
-/// Whether the config file is CommonJS (true/false)
+/// Whether the config file is `CommonJS` (true/false)
 pub const CONFIG_IS_COMMONJS: &str = "NSAGA_CLI_CONFIG_IS_COMMONJS";
 
 /// Whether running in development mode (true/false)
