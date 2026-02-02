@@ -4,6 +4,80 @@
 
 ## 历史完成记录
 
+### 代码质量清理 (2026-02-XX)
+
+#### ~~任务: Rust Clippy 警告全面修复~~ ✅ 已完成
+
+**修复内容**: 从 30+ warnings 降至 0 warnings
+
+##### 文件修改清单
+
+**`projects/cli/src/bridge/manager/mod.rs`**
+
+- `shutdown_all()`: 移除不必要的 `Result<()>` 包装 - 该函数从不失败，只记录错误
+- `get_workspace_root()`: 将 `map().unwrap_or_else()` 改为 `map_or_else()`
+
+**`projects/cli/src/bridge/runtime/discovery.rs`**
+
+- `RuntimeType` enum: 添加 `Copy` derive
+- `supports_native_typescript()`: 合并相同的 match arms (`Bun | Deno`)
+- `get_version()`: 移除 `&self` 改为关联函数 `Self::get_version()`
+- `RuntimeDiscovery` impl: 添加 `#[allow(clippy::unused_self, clippy::trivially_copy_pass_by_ref)]`（ZST 使用实例方法模式）
+- `RuntimeType` impl: 添加 `#[allow(clippy::trivially_copy_pass_by_ref)]`（1-byte enum，遵循 Rust 惯例）
+
+**`projects/cli/src/bridge/runtime/process.rs`**
+
+- `pid()`: 返回类型从 `Option<u32>` 改为 `u32`（始终为 `Some`）
+- `is_running()`: 合并相同的 match arms: `Ok(Some(_)) | Err(_) => false`
+
+**`projects/cli/src/config/loader.rs`** (主要重构)
+
+- 创建 `ConfigLoaderFn` 类型别名解决复杂闭包类型
+- 创建 `LoaderContext` 结构体将函数参数从 8 个减少到 3 个
+- 将 `&Option<PathBuf>` 模式改为 `Option<&PathBuf>`
+- 删除 `load_js_config_impl` 和 `load_ts_config_impl` 中间函数
+
+**测试文件** (`rpc/tests.rs`, `runtime/tests.rs`, `transport/tests.rs`)
+
+- doc comments 中的代码标识符添加反引号 (`doc_markdown` lint)
+- 内联 format 字符串变量 (`{e}` 替代 `{}`, e)
+- `if let Ok(_) = x` 改为 `x.is_ok()`
+
+---
+
+#### ~~任务: TypeScript ESLint 错误全面修复~~ ✅ 已完成
+
+**修复内容**: 从 42 errors 降至 0 errors
+
+##### 文件修改清单
+
+- `bridge-core/src/interfaces/service.ts`: 修复 `Promise<unknown> | unknown` 冗余联合类型 → `unknown`
+- `bridge-core/src/rpc-handler.ts`: 正确类型标注，`!` 替换为 `?? null`
+- `bridge-deno/src/index.ts`: 使用 `instanceof Error` 检查修复 unsafe `any` 参数
+- `bridge-deno/src/transport.ts`: 添加 eslint-disable for triple-slash reference
+- `bridge-nodejs/src/transport.ts`: 为 floating promises 添加 `void`
+- `bridge-nodejs/build.mts`: 重写格式化并为 floating promise 添加 `void`
+- `bridge-bun/src/transport.ts`: 为 floating promises 添加 `void`
+- `config-bridge/src/services/config.ts`: 修复冗余类型联合，正确类型标注
+- `config-bridge/src/index.ts`: catch 参数改为 `unknown` 类型
+
+---
+
+#### ~~任务: E2E 测试验证~~ ✅ 全部通过
+
+**14 个测试场景全部通过**:
+
+- Config Priority ✅
+- Error Handling ✅
+- Node.js + JS ESM/CJS (.mjs/.cjs) ✅
+- Node.js + TS ESM/CJS (.mts/.cts) ✅
+- Bun + JS ESM/CJS (.mjs/.cjs) ✅
+- Bun + TS ESM/CJS (.mts/.cts) ✅
+- Deno + JS ESM/CJS (.mjs/.cjs) ✅
+- Deno + TS ESM/CJS (.mts/.cts) ✅
+
+---
+
 ### 优先级 P1: 代码质量和稳定性
 
 #### ~~任务 1.1: 清理编译警告~~ ✅ 已完成 (2026-01-26)
