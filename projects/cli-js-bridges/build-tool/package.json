@@ -1,0 +1,12 @@
+{
+  "name": "@nsaga/build-tool",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.mts"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "esbuild": "^0.27.2"
+  }
+}

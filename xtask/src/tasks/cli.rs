@@ -59,7 +59,19 @@ impl CliTarget {
   }
 }
 
-pub fn build_single(target: Option<String>) -> Result<()> {
+pub fn build_single(target: Option<String>, asset_install_dir: &str, release: bool, skip_js: bool) -> Result<()> {
+  // 确保 JS bridges 已构建（除非明确跳过）
+  if !skip_js {
+    println!("🔧 Ensuring JavaScript bridges are built...");
+    super::build::build_all()?;
+    println!();
+  }
+
+  build_single_internal(target, asset_install_dir, release)
+}
+
+/// 内部构建函数（不检查 JS bridges）
+fn build_single_internal(target: Option<String>, asset_install_dir: &str, release: bool) -> Result<()> {
   let target = if let Some(name) = target {
     CliTarget::from_name(&name)?
   } else {
@@ -69,6 +81,7 @@ pub fn build_single(target: Option<String>) -> Result<()> {
   };
 
   println!("🚀 Building NovelSaga CLI for {}...", target.name);
+  println!("📦 Asset install dir: {}", asset_install_dir);
 
   let cli_out = cli_out_dir().join(target.name);
   let cli_dir = cli_project_dir();
@@ -79,24 +92,27 @@ pub fn build_single(target: Option<String>) -> Result<()> {
 
   println!("🔨 Building for {}...", target.cargo_target);
 
-  // Build using cargo-zigbuild
-  run_command(
-    Command::new("cargo")
-      .args([
-        "zigbuild",
-        "--release",
-        "--target",
-        target.cargo_target,
-        "--target-dir",
-        target_dir.to_str().unwrap(),
-      ])
-      .current_dir(&cli_dir),
-  )?;
+  // Build command
+  let mut cmd = Command::new("cargo");
+  cmd.arg("zigbuild");
+
+  if release {
+    cmd.arg("--release");
+  }
+
+  cmd
+    .args(["--target", target.cargo_target])
+    .args(["--target-dir", target_dir.to_str().unwrap()])
+    .env("NSAGA_ASSET_INSTALL_DIR", asset_install_dir)
+    .current_dir(&cli_dir);
+
+  run_command(&mut cmd)?;
 
   // Copy binary
+  let build_profile = if release { "release" } else { "debug" };
   let artifact = target_dir
     .join(target.cargo_target)
-    .join("release")
+    .join(build_profile)
     .join(target.binary_name);
 
   if !artifact.exists() {
@@ -118,18 +134,27 @@ pub fn build_single(target: Option<String>) -> Result<()> {
   Ok(())
 }
 
-pub fn build_all() -> Result<()> {
+pub fn build_all(asset_install_dir: &str, release: bool, skip_js: bool) -> Result<()> {
   println!("🚀 Building NovelSaga CLI for all platforms...");
+  println!("📦 Asset install dir: {}", asset_install_dir);
 
+  // 1. 先清理旧的输出目录
   let cli_out = cli_out_dir();
   if cli_out.exists() {
     fs::remove_dir_all(&cli_out)?;
   }
   fs::create_dir_all(&cli_out)?;
 
+  // 2. 构建 JS bridges（只构建一次，会自动复制到 out/cli/assets，除非明确跳过）
+  if !skip_js {
+    println!("\n🔧 Building JavaScript bridges...");
+    super::build::build_all()?;
+    println!();
+  }
+
   for target in CliTarget::ALL {
     println!("\n════════════════════════════════════════");
-    build_single(Some(target.name.to_string()))?;
+    build_single_internal(Some(target.name.to_string()), asset_install_dir, release)?;
   }
 
   println!("\n════════════════════════════════════════");

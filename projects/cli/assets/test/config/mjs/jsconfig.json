@@ -1,9 +1,0 @@
-{
-  "compilerOptions": {
-    "module": "ESNext",
-    "target": "ESNext",
-    "checkJs": true,
-    "allowJs": true
-  },
-  "include": ["**/*.js"]
-}

@@ -1,0 +1,17 @@
+{
+  "name": "nsaga-cli-nodejs-config-bridge",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "node build.mts"
+  },
+  "dependencies": {
+    "@nsaga/bridge-nodejs": "workspace:*",
+    "@nsaga/bridge-bun": "workspace:*",
+    "@nsaga/bridge-deno": "workspace:*",
+    "@nsaga/bridge-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@nsaga/build-tool": "workspace:*"
+  }
+}

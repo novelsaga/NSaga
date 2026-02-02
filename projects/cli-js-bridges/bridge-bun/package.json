@@ -1,0 +1,26 @@
+{
+  "name": "@nsaga/bridge-bun",
+  "type": "module",
+  "private": true,
+  "description": "Bun runtime adapter for NovelSaga bridge system",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./transport": {
+      "types": "./dist/transport.d.ts",
+      "default": "./dist/transport.js"
+    }
+  },
+  "scripts": {
+    "build": "node build.mts"
+  },
+  "dependencies": {
+    "@nsaga/bridge-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@nsaga/build-tool": "workspace:*",
+    "@types/bun": "^1.1.14"
+  }
+}

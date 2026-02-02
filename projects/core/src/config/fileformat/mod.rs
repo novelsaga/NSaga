@@ -5,6 +5,11 @@ use gray_matter::{Matter, Pod};
 
 use crate::state::init::Initializer;
 
+/// File extension constants for different file formats
+const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown"];
+const JAVASCRIPT_EXTENSIONS: &[&str] = &["js", "cjs", "mjs"];
+const TYPESCRIPT_EXTENSIONS: &[&str] = &["ts", "cts", "mts"];
+
 #[derive(Debug, Clone, Copy)]
 pub enum NovelSagaFileFormat {
   Markdown,
@@ -12,13 +17,21 @@ pub enum NovelSagaFileFormat {
   TypeScript,
 }
 
+impl NovelSagaFileFormat {
+  /// Get file extensions for this format (public helper, no trait required)
+  #[must_use]
+  pub const fn get_extensions(&self) -> &'static [&'static str] {
+    match self {
+      NovelSagaFileFormat::Markdown => MARKDOWN_EXTENSIONS,
+      NovelSagaFileFormat::JavaScript => JAVASCRIPT_EXTENSIONS,
+      NovelSagaFileFormat::TypeScript => TYPESCRIPT_EXTENSIONS,
+    }
+  }
+}
+
 impl FileStoredFormat for NovelSagaFileFormat {
   fn file_extensions(&self) -> &'static [&'static str] {
-    match self {
-      NovelSagaFileFormat::Markdown => &["md", "markdown"],
-      NovelSagaFileFormat::JavaScript => &["js", "cjs", "mjs"],
-      NovelSagaFileFormat::TypeScript => &["ts", "cts", "mts"],
-    }
+    self.get_extensions()
   }
 }
 

@@ -2,12 +2,33 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use path_absolutize::Absolutize;
-use version_compare::Version;
-use which::which;
 
-const MIN_TS_NODE_VERSION: &str = "23.6";
+/// JavaScript 运行时选择
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeChoice {
+  /// 自动检测（默认）
+  Auto,
+  /// 强制使用 Node.js
+  Node,
+  /// 强制使用 Bun
+  Bun,
+  /// 强制使用 Deno
+  Deno,
+}
 
-const MIN_JS_NODE_VERSION: &str = "13.2.0";
+impl std::str::FromStr for RuntimeChoice {
+  type Err = String;
+
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match s.to_lowercase().as_str() {
+      "auto" => Ok(RuntimeChoice::Auto),
+      "node" | "nodejs" => Ok(RuntimeChoice::Node),
+      "bun" => Ok(RuntimeChoice::Bun),
+      "deno" => Ok(RuntimeChoice::Deno),
+      _ => Err(format!("Invalid runtime: '{s}'. Valid options: auto, node, bun, deno",)),
+    }
+  }
+}
 
 #[derive(Parser)]
 #[command(name = "novelsaga_server")]
@@ -17,9 +38,22 @@ pub struct Cli {
   /// Start as LSP server (communicates via stdin/stdout)
   #[arg(long)]
   pub lsp: bool,
-  /// Path to the Node.js executable
+
+  /// Choose JavaScript runtime (auto, node, bun, deno)
+  #[arg(long, default_value = "auto", value_name = "RUNTIME")]
+  runtime: RuntimeChoice,
+
+  /// Path to the Node.js executable (overrides automatic detection)
   #[arg(long)]
   node_path: Option<PathBuf>,
+
+  /// Path to the Bun executable (overrides automatic detection)
+  #[arg(long)]
+  bun_path: Option<PathBuf>,
+
+  /// Path to the Deno executable (overrides automatic detection)
+  #[arg(long)]
+  deno_path: Option<PathBuf>,
 }
 
 impl Cli {
@@ -29,56 +63,47 @@ impl Cli {
     cli
   }
 
-  /// 获取 node.js 可执行文件路径
-  /// 如果参数没有提供，则从主机环境中查找node命令
-  /// 最后返回None
+  /// 获取用户选择的运行时
+  pub fn get_runtime_choice(&self) -> RuntimeChoice {
+    self.runtime
+  }
+
+  /// 获取用户指定的 Node.js 可执行文件路径（绝对路径）
   pub fn get_node_path(&self) -> Option<PathBuf> {
-    if let Some(ref node_path) = self.node_path {
-      // path 转为绝对路径
-      return Some(node_path.absolutize().unwrap().to_path_buf());
-    }
-    if let Ok(path) = which("node") {
-      return Some(path.absolutize().unwrap().to_path_buf());
-    }
-    None
+    self.node_path.as_ref().map(|p| p.absolutize().unwrap().to_path_buf())
   }
 
-  /// 获取node版本号 并去掉前缀v
-  pub fn get_node_version(&self) -> Option<String> {
-    let node_path = self.get_node_path()?;
-    let output = std::process::Command::new(node_path).arg("-v").output().ok()?;
-    if output.status.success() {
-      let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-      Some(version.trim_start_matches('v').to_string())
-    } else {
-      None
-    }
+  /// 获取用户指定的 Bun 可执行文件路径（绝对路径）
+  pub fn get_bun_path(&self) -> Option<PathBuf> {
+    self.bun_path.as_ref().map(|p| p.absolutize().unwrap().to_path_buf())
   }
 
-  /// 判断js支持
-  pub fn is_js_supported(&self) -> bool {
-    self.get_node_version().is_some()
-  }
-
-  /// 判断版本号是否大于等于23.6(原生支持ts)
-  pub fn is_ts_supported(&self) -> bool {
-    let min_ts_node_version = Version::from(MIN_TS_NODE_VERSION).unwrap();
-    if let Some(version_str) = self.get_node_version() {
-      let version_str = version_str.trim_start_matches('v');
-      if let Some(version) = Version::from(version_str) {
-        return version >= min_ts_node_version;
-      }
-    }
-    false
+  /// 获取用户指定的 Deno 可执行文件路径（绝对路径）
+  pub fn get_deno_path(&self) -> Option<PathBuf> {
+    self.deno_path.as_ref().map(|p| p.absolutize().unwrap().to_path_buf())
   }
 
   /// 验证并处理命令行参数
-  pub fn validate(&self) {
-    // if node_path is provided, judge node.js executable
+  fn validate(&self) {
+    // 验证 Node.js 路径
     if let Some(ref node_path) = self.node_path
       && !node_path.try_exists().unwrap_or(false)
     {
       eprintln!("Warning: Node.js executable {} does not exist.", node_path.display());
+    }
+
+    // 验证 Bun 路径
+    if let Some(ref bun_path) = self.bun_path
+      && !bun_path.try_exists().unwrap_or(false)
+    {
+      eprintln!("Warning: Bun executable {} does not exist.", bun_path.display());
+    }
+
+    // 验证 Deno 路径
+    if let Some(ref deno_path) = self.deno_path
+      && !deno_path.try_exists().unwrap_or(false)
+    {
+      eprintln!("Warning: Deno executable {} does not exist.", deno_path.display());
     }
   }
 }

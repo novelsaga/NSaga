@@ -1,5 +1,5 @@
 packages:
-  - projects/cli/assets/js/src/*
+  - projects/cli-js-bridges/*
 
 onlyBuiltDependencies:
   - esbuild

@@ -1,7 +1,9 @@
 pub mod bindings;
+pub mod build;
 pub mod clean;
 pub mod cli;
 pub mod diplomat;
 pub mod so;
+pub mod test;
 pub mod utils;
 pub mod wasm;

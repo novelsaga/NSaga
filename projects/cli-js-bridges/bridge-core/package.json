@@ -1,0 +1,34 @@
+{
+  "name": "@nsaga/bridge-core",
+  "type": "module",
+  "private": true,
+  "description": "Runtime-agnostic bridge core types and interfaces",
+  "exports": {
+    "./types/rpc": {
+      "types": "./dist/types/rpc.d.ts",
+      "default": "./dist/types/rpc.js"
+    },
+    "./interfaces/transport": {
+      "types": "./dist/interfaces/transport.d.ts",
+      "default": "./dist/interfaces/transport.js"
+    },
+    "./interfaces/service": {
+      "types": "./dist/interfaces/service.d.ts",
+      "default": "./dist/interfaces/service.js"
+    },
+    "./rpc-handler": {
+      "types": "./dist/rpc-handler.d.ts",
+      "default": "./dist/rpc-handler.js"
+    },
+    "./bridge-server": {
+      "types": "./dist/bridge-server.d.ts",
+      "default": "./dist/bridge-server.js"
+    }
+  },
+  "scripts": {
+    "build": "node build.mts"
+  },
+  "devDependencies": {
+    "@nsaga/build-tool": "workspace:*"
+  }
+}

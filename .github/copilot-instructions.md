@@ -95,7 +95,7 @@ The `.envrc` file automatically loads the Nix development environment with all c
   - Node.js version detection for TypeScript support (≥23.6 for native TS)
   - JS Bridge system for dynamic config loading via JSON-RPC over stdin/stdout
 
-- **TypeScript Bridges** (`projects/cli/assets/js/src/`): Node.js services called by Rust
+- **TypeScript Bridges** (`projects/cli-js-bridges/`): Node.js services called by Rust
   - `shared/`: JSON-RPC 2.0 protocol, stdio transport, bridge server framework
   - `config-bridge/`: Loads JS/TS config files and returns serialized config to Rust
   - Standard structure: `src/`, `build.mts`, `package.json`, `tsconfig.json`
@@ -176,7 +176,7 @@ export default (settings) => ({
 - Monorepo managed by `pnpm workspace` (root: `~/code/src/nsaga/pnpm-workspace.yaml`)
 - **Never install deps at subproject level** - use root `pnpm install`
 - Build with `node --experimental-strip-types build.mts` (Node 23.6+) or esbuild
-- Bridge outputs: Single bundled JS to `projects/cli/assets/js/dist/`
+- Bridge outputs: Single bundled JS to `projects/cli-js-bridges/dist/`
 
 ### JS Bridge Development Pattern
 
@@ -203,26 +203,38 @@ class MyService implements Service {
 
 Rust calls via: `{"jsonrpc":"2.0","id":1,"method":"myservice.myMethod","params":{}}`
 
-### Bridge Architecture (Runtime Adapters)
+### Bridge Architecture (Factory Pattern - 2026-01-26 重构)
 
-The bridge system uses a layered architecture to support multiple JS runtimes:
+The bridge system uses **dependency injection + factory pattern** to eliminate code duplication:
 
+#### Core Layer (Shared)
 - **bridge-core** (`@nsaga/bridge-core`): Runtime-agnostic core
   - `types/rpc.ts`: JSON-RPC 2.0 protocol types
   - `interfaces/transport.ts`: Abstract Transport interface
   - `interfaces/service.ts`: Abstract Service interface
+  - **`rpc-handler.ts`**: Shared RPC protocol handler (完全共享，271行)
+  - **`bridge-server.ts`**: Shared bridge server (依赖注入，接受 Transport + ErrorHandler)
 
-- **bridge-nodejs** (`@nsaga/bridge-nodejs`): Node.js runtime adapter
-  - `transport.ts`: StdioTransport implementation (stdin/stdout)
-  - `rpc-handler.ts`: RPCHandler with service routing
-  - `bridge-server.ts`: BridgeServer main class
-  - Depends on: `@nsaga/bridge-core`
+#### Runtime Adapters (Thin Wrappers)
+- **bridge-nodejs/bun/deno** (`@nsaga/bridge-*`): Runtime-specific adapters (~120-150行/adapter)
+  - `transport.ts`: Runtime-specific stdin/stdout implementation
+  - `index.ts`: **Factory function** `createBridgeServer(config)` + runtime-specific ErrorHandler
+  - Re-exports: `BridgeServer`, `RPCHandler` from `@nsaga/bridge-core`
 
-- **Future adapters**: `bridge-bun`, `bridge-deno` (same pattern)
+#### Usage Pattern
+```typescript
+// Dynamic loading based on NSAGA_RUNTIME
+const { createBridgeServer } = await import("@nsaga/bridge-nodejs");
+const server = createBridgeServer({ name: "my-bridge", version: "1.0.0" });
+server.registerService("myservice", new MyService());
+server.start();
+```
 
-- **Bridges** (e.g., `config-bridge`): Specific functionality bridges
-  - Depend on runtime adapter (e.g., `@nsaga/bridge-nodejs`)
-  - Build to single file: `dist/{bridge-name}.js`
+#### Benefits
+- ✅ DRY: Core logic maintained in one place (eliminated ~780 lines of duplication)
+- ✅ Type safety: All adapters share the same interfaces
+- ✅ Easy to extend: New runtime = Transport + ErrorHandler implementation
+- ✅ Bug fixes apply to all runtimes automatically
 
 ## Critical Workflows
 
@@ -233,7 +245,7 @@ The bridge system uses a layered architecture to support multiple JS runtimes:
 cd ~/code/src/nsaga && pnpm install
 
 # Build bridge-core first (dependency of runtime adapters)
-cd projects/cli/assets/js/src/bridge-core && pnpm run build
+cd projects/cli-js-bridges/bridge-core && pnpm run build
 
 # Build runtime adapter (e.g., bridge-nodejs)
 cd ../bridge-nodejs && pnpm run build
@@ -260,7 +272,7 @@ $DEVENV_ROOT/xtask.sh --help
 # Manual test via stdin/stdout
 export NSAGA_CLI_CONFIG_PATH="/path/to/config.js"
 echo '{"jsonrpc":"2.0","id":1,"method":"config.get","params":{}}' | \
-  node projects/cli/assets/js/dist/config-bridge.js
+  node projects/cli-js-bridges/dist/config-bridge.js
 ```
 
 ## Integration Points
@@ -270,15 +282,15 @@ echo '{"jsonrpc":"2.0","id":1,"method":"config.get","params":{}}' | \
 When modifying config structs in `projects/core/src/config/mod.rs`:
 1. Add `#[derive(TS)]` and `#[ts(export, export_to = "_config.ts")]`
 2. Run tests to generate: `cargo test export_bindings`
-3. TS types appear in `projects/cli/assets/js/src/config-bridge/src/types/_config.ts`
+3. TS types appear in `projects/cli-js-bridges/config-bridge/src/types/_config.ts`
 4. Extend in `config.ts`: `type NovelSagaConfig = OverridableConfig & RootConfig`
 
 ### Adding New JS Bridges
 
-1. Create `projects/cli/assets/js/src/my-bridge/` with standard 4-file structure
-2. Add to `pnpm-workspace.yaml` packages pattern (already covered by `src/*`)
+1. Create `projects/cli-js-bridges/my-bridge/` with standard 4-file structure
+2. Add to `pnpm-workspace.yaml` packages pattern (already covered by `cli-js-bridges/src/*`)
 3. Add `"@nsaga/bridge-nodejs": "workspace:*"` dependency in `package.json`
-4. Build outputs to `dist/my-bridge.js` (sibling to `config-bridge.js`)
+4. Build outputs to `projects/cli-js-bridges/dist/my-bridge.js`
 5. Rust spawns via `RuntimeProcess::spawn(info, "path/to/dist/my-bridge.js", env)`
 
 ## Cross-Platform Considerations
@@ -313,6 +325,7 @@ When working on this project, AI agents should:
    - All AI-generated docs go to `docs/ai-generated/`
    - Never scatter documentation across the project
    - Update existing docs rather than creating duplicates
+   - **After refactoring**: Always update related docs (see Common Pitfalls below)
 
 4. **Incremental Progress**: Work step-by-step with checkpoints
    - Break complex tasks into smaller steps
@@ -336,3 +349,9 @@ When working on this project, AI agents should:
 - **Config file location**: Search upward from current directory, stop at workspace root
 - **Dependencies**: Always install at root level (`~/code/src/nsaga`), never in subprojects
 - **Shell aliases**: When debugging, check `command -v <cmd>` (e.g., `ls→eza`, `cat→bat`, `find→fd`) - use `list_dir`, `read_file` tools instead
+- **⚠️ After Refactoring**: ALWAYS update documentation
+  - Check `docs/ai-generated/` for related docs (use grep search)
+  - Update architecture diagrams, code examples, file structure listings
+  - JS refactoring: Update JS-specific docs (MULTI_RUNTIME_SUPPORT.md, PROGRESS_STAGE_1_TO_3.md), DO NOT merge into general docs
+  - Rust refactoring: Update roadmap and progress docs
+  - Delete obsolete sections that describe old patterns

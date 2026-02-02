@@ -1,0 +1,26 @@
+{
+  "name": "@nsaga/bridge-deno",
+  "type": "module",
+  "private": true,
+  "description": "Deno runtime adapter for NovelSaga bridge system",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./transport": {
+      "types": "./dist/transport.d.ts",
+      "default": "./dist/transport.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "deno types > deno.d.ts",
+    "build": "node build.mts"
+  },
+  "dependencies": {
+    "@nsaga/bridge-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@nsaga/build-tool": "workspace:*"
+  }
+}

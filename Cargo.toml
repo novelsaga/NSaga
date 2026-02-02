@@ -1,4 +1,5 @@
 [workspace]
+  exclude  = ["projects/cli-js-bridges"]
   members  = ["projects/*", "xtask"]
   resolver = "3"
 
