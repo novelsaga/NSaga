@@ -198,6 +198,16 @@ const tseslintConfig = defineConfig(
       ],
     },
   },
+  // Allow unlimited eslint-disable only for auto-generated files
+  {
+    files: ['**/_*.ts', '**/_*.mts', '**/_*.cts', '**/generated/**/*.ts'],
+    ignores: commonIgnores,
+    rules: {
+      'eslint-comments/require-description': 'off',
+      'eslint-comments/no-unlimited-disable': 'off',
+      'eslint-comments/disable-enable-pair': 'off',
+    },
+  },
 )
 
 export default tseslintConfig

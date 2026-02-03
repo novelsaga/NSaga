@@ -78,6 +78,31 @@
 
 ---
 
+#### ~~任务: 配置文件修复和构建系统优化~~ ✅ 已完成 (2026-02-04)
+
+**实现内容**:
+
+- ✅ 将生成的 TS 类型文件路径从旧位置 `projects/cli/assets/js/src/js-config-bridge/src/types` 更改为新位置 `projects/cli-js-bridges/config-bridge/src/types`
+- ✅ 优化 TypeScript 配置服务，使用私有字段语法 `#settings` 提高封装性
+- ✅ 添加 `projects/cli-js-bridges/config-bridge/src/types/.gitignore` 以忽略自动生成的 `_config.ts` 文件
+- ✅ 优化 xtask 构建流程，将类型生成整合到构建步骤中，确保顺序执行
+- ✅ 更新 OpenCode LSP 配置以支持 Rust、TypeScript 和 Nix 的语言服务器
+- ✅ 修复 ESLint 配置，允许对自动生成文件使用无限制的 eslint-disable 注释
+- ✅ 更新 Nix 配置文件，修正依赖哈希值和格式化问题
+
+**文件修改**:
+
+- `.opencode/config.json` - 添加 LSP 配置支持
+- `eslint.config.mts` - 调整规则以适应生成文件
+- `packages.nix` - 更新依赖哈希和格式化
+- `projects/cli-js-bridges/config-bridge/src/services/config.ts` - 优化服务实现
+- `projects/cli-js-bridges/config-bridge/src/types/.gitignore` - 新增忽略规则
+- `projects/cli-js-bridges/config-bridge/src/types/_config.ts` - 移除旧的生成文件
+- `xtask/src/tasks/bindings.rs` - 更新生成路径
+- `xtask/src/tasks/build.rs` - 整合类型生成到构建流程
+
+---
+
 ### 优先级 P1: 代码质量和稳定性
 
 #### ~~任务 1.1: 清理编译警告~~ ✅ 已完成 (2026-01-26)

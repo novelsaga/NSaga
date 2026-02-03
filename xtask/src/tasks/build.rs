@@ -6,7 +6,7 @@ use std::{fs, path::Path, process::Command};
 
 use anyhow::{Context, Result};
 
-use crate::tasks::utils::project_root;
+use crate::tasks::{bindings, utils::project_root};
 
 /// Bridge 配置
 struct BridgeConfig {
@@ -44,8 +44,20 @@ const BRIDGES: &[&[BridgeConfig]] = &[
   }],
 ];
 
+pub fn generate_types() -> Result<()> {
+  println!("📦 Step 1/2: Generating TypeScript bindings...");
+  println!("TS-RS: Running ts-rs binding generation...");
+
+  bindings::generate_ts()?;
+
+  println!("✅ TypeScript type generation complete\n");
+  Ok(())
+}
+
 /// 构建所有 JS bridges
 pub fn build_all() -> Result<()> {
+  generate_types()?;
+
   println!("🔨 Building JavaScript bridges...\n");
 
   let workspace_root = project_root();

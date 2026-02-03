@@ -2,7 +2,7 @@
  * Config Service - 加载和管理配置文件
  */
 
-import type { Service } from '@nsaga/bridge-core/interfaces/service'
+import type { Service, ServiceMethod } from '@nsaga/bridge-core/interfaces/service'
 
 import type { NovelSagaConfig } from '../types/config.js'
 
@@ -24,15 +24,13 @@ interface ConfigModule {
   [key: string]: unknown
 }
 
-type AnyMethod = (params: unknown) => unknown
-
 export class ConfigService implements Service {
-  private settings: GlobalSettings;
+  readonly #settings: GlobalSettings;
 
-  [method: string]: AnyMethod | undefined | GlobalSettings
+  [method: string]: ServiceMethod | undefined
 
   constructor() {
-    this.settings = {
+    this.#settings = {
       CONFIG_IS_COMMONJS: process.env[ENV_KEYS.CONFIG_IS_COMMONJS] === 'true',
       CONFIG_IS_TYPESCRIPT: process.env[ENV_KEYS.CONFIG_IS_TYPESCRIPT] === 'true',
       CONFIG_PATH: process.env[ENV_KEYS.CONFIG_PATH],
@@ -43,15 +41,15 @@ export class ConfigService implements Service {
   }
 
   async get(): Promise<NovelSagaConfig> {
-    if (!this.settings.CONFIG_PATH) {
+    if (!this.#settings.CONFIG_PATH) {
       throw new Error('CONFIG_PATH not defined')
     }
 
-    const configModule = (await import(this.settings.CONFIG_PATH)) as ConfigModule
+    const configModule = (await import(this.#settings.CONFIG_PATH)) as ConfigModule
 
     let configMain: NovelSagaConfig | ConfigFactory
 
-    if (this.settings.CONFIG_IS_COMMONJS) {
+    if (this.#settings.CONFIG_IS_COMMONJS) {
       configMain = (configModule.default ?? configModule) as NovelSagaConfig | ConfigFactory
     } else {
       configMain = (configModule.default ?? configModule) as NovelSagaConfig | ConfigFactory
@@ -59,7 +57,7 @@ export class ConfigService implements Service {
 
     let config: NovelSagaConfig
     if (typeof configMain === 'function') {
-      config = configMain(this.settings)
+      config = configMain(this.#settings)
     } else {
       config = configMain
     }

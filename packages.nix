@@ -22,10 +22,13 @@
     pkgs.fetchPnpmDeps {
       inherit pname;
       src = ./.;
-      hash = "sha256-BHxMv/OXZ0Lpv1C2urz0B5Gyonek5okobQS2go3+ndE=";
+      hash = "sha256-eXdng0f5qaS1HYerv4HYyDm4A5blZkLqUblRFic8edE=";
       fetcherVersion = 3;
     };
-  license = with lib.licenses; [lgpl3 mit];
+  license = with lib.licenses; [
+    lgpl3
+    mit
+  ];
 
   commonArgs = {
     version = (lib.importTOML ./Cargo.toml).workspace.package.version;
@@ -45,7 +48,8 @@
   ];
 in {
   packages = rec {
-    default = pkgs.rustPlatform.buildRustPackage (commonArgs
+    default = pkgs.rustPlatform.buildRustPackage (
+      commonArgs
       // {
         pname = "novelsaga";
         pnpmDeps = pnpmDeps default.pname;
@@ -81,10 +85,12 @@ in {
           inherit license;
           mainProgram = "novelsaga";
         };
-      });
+      }
+    );
     cli = default;
 
-    bundle = pkgs.rustPlatform.buildRustPackage (commonArgs
+    bundle = pkgs.rustPlatform.buildRustPackage (
+      commonArgs
       // {
         pname = "novelsaga-bundle";
 
@@ -207,6 +213,7 @@ in {
           inherit license;
           description = "NovelSaga multi-target bundle built via xtask";
         };
-      });
+      }
+    );
   };
 }
