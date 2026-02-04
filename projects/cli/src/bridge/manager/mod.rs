@@ -121,7 +121,7 @@ impl BridgeManager {
     let factories = self.factories.lock().unwrap();
     let factory = factories.get(name).ok_or_else(|| BridgeError::BridgeNotFound {
       name: name.to_string(),
-      suggestion: "可用的 Bridge:\n  - config-bridge (配置文件加载)".to_string(),
+      suggestion: "Available bridges:\n  - config-bridge (config file loading)".to_string(),
     })?;
 
     let mut last_error = None;
@@ -278,7 +278,8 @@ mod tests {
         .ok_or_else(|| BridgeError::RuntimeNotFound {
           runtime_type: "Node.js".to_string(),
           searched_paths: "  - $PATH\n  - /usr/bin/node\n  - /usr/local/bin/node".to_string(),
-          suggestion: "解决方案:\n1. 安装 Node.js: https://nodejs.org/\n2. 或使用 --node-path 指定路径".to_string(),
+          suggestion: "Solution:\n1. Install Node.js: https://nodejs.org/\n2. Or use --node-path to specify the path"
+            .to_string(),
         })?;
 
       let mut env = HashMap::new();

@@ -82,7 +82,7 @@ impl RuntimeProcess {
     // 启动进程
     let mut child = cmd.spawn().map_err(|e| BridgeError::IoError {
       context: format!(
-        "Failed to spawn {} process\n\n脚本: {}\n运行时: {}",
+        "Failed to spawn {} process\n\nScript: {}\nRuntime: {}",
         runtime_info.runtime_type.executable_name(),
         script_path.display(),
         runtime_info.path.display()
@@ -98,7 +98,7 @@ impl RuntimeProcess {
       // 清理进程
       let _ = child.kill();
       return Err(BridgeError::Other(
-         "无法捕获子进程的标准输入/输出\n\n原因: stdin 或 stdout 未能正确初始化\n\n解决方案: 确保有足够的系统资源（文件描述符）".to_string(),
+         "Cannot capture child process stdin/stdout\n\nCause: stdin or stdout failed to initialize\n\nSolution: Ensure sufficient system resources (file descriptors)".to_string(),
        ));
     }
 

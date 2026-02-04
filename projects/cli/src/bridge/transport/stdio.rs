@@ -56,16 +56,16 @@ impl StdioTransport {
   /// 如果子进程的 stdin 或 stdout 已被 take 则返回错误
   pub fn from_child(child: &mut Child) -> Result<Self> {
     let stdin = child.stdin.take().ok_or_else(|| {
-      BridgeError::Other(
-        "无法从子进程获取 stdin\n\n原因: stdin 可能已被其他代码取出\n\n解决方案: 检查是否多次调用 from_child()".into(),
-      )
-    })?;
+       BridgeError::Other(
+         "Cannot get stdin from child process\n\nCause: stdin may have been taken by other code\n\nSolution: Check if from_child() is called multiple times".into(),
+       )
+     })?;
     let stdout = child.stdout.take().ok_or_else(|| {
-      BridgeError::Other(
-        "无法从子进程获取 stdout\n\n原因: stdout 可能已被其他代码取出\n\n解决方案: 检查是否多次调用 from_child()"
-          .into(),
-      )
-    })?;
+       BridgeError::Other(
+         "Cannot get stdout from child process\n\nCause: stdout may have been taken by other code\n\nSolution: Check if from_child() is called multiple times"
+           .into(),
+       )
+     })?;
     Ok(Self::new(stdin, stdout))
   }
 

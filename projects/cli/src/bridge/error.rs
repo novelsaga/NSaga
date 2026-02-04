@@ -20,7 +20,7 @@ pub enum BridgeError {
   },
 
   /// IO 错误（带操作上下文）
-  #[error("{context}\n\n原因: {source}")]
+  #[error("{context}\n\nCause: {source}")]
   IoError { context: String, source: std::io::Error },
 
   /// 传输层已关闭
@@ -42,12 +42,12 @@ pub enum BridgeError {
   #[error("Bridge not initialized")]
   NotInitialized,
 
-  /// Bridge 未找到（带建议）
-  #[error("未找到 Bridge: {name}\n\n{suggestion}")]
+  /// Bridge not found (with suggestion)
+  #[error("Bridge not found: {name}\n\n{suggestion}")]
   BridgeNotFound { name: String, suggestion: String },
 
-  /// 运行时未找到（带搜索路径和解决方案）
-  #[error("未找到 {runtime_type} 运行时\n\n搜索路径:\n{searched_paths}\n\n解决方案:\n{suggestion}")]
+  /// Runtime not found (with searched paths and suggestion)
+  #[error("Runtime not found: {runtime_type}\n\nSearched paths:\n{searched_paths}\n\nSuggestion:\n{suggestion}")]
   RuntimeNotFound {
     runtime_type: String,
     searched_paths: String,
