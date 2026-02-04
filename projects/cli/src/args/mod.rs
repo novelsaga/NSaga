@@ -31,7 +31,7 @@ impl std::str::FromStr for RuntimeChoice {
 }
 
 /// Subcommands for NovelSaga CLI
-#[derive(Subcommand, Clone)]
+#[derive(Subcommand, Clone, Debug)]
 pub enum Commands {
   /// Start as LSP server (communicates via stdin/stdout)
   Lsp {},
@@ -136,5 +136,53 @@ impl Cli {
     {
       eprintln!("Warning: Deno executable {} does not exist.", deno_path.display());
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_parse_no_subcommand() {
+    let cli = Cli::parse_from(["novelsaga"]);
+    assert!(cli.command.is_none(), "Expected no subcommand");
+  }
+
+  #[test]
+  fn test_parse_lsp_subcommand() {
+    let cli = Cli::parse_from(["novelsaga", "lsp"]);
+    match &cli.command {
+      Some(Commands::Lsp {}) => {}
+      _ => panic!("Expected Lsp command, got {:?}", cli.command),
+    }
+  }
+
+  #[test]
+  fn test_parse_init_subcommand() {
+    let cli = Cli::parse_from(["novelsaga", "init", "/path/to/project"]);
+    match &cli.command {
+      Some(Commands::Init { path }) => {
+        assert_eq!(path.to_string_lossy(), "/path/to/project");
+      }
+      _ => panic!("Expected Init command, got {:?}", cli.command),
+    }
+  }
+
+  #[test]
+  fn test_parse_global_runtime_with_subcommand() {
+    let cli = Cli::parse_from(["novelsaga", "--runtime", "node", "lsp"]);
+    assert_eq!(cli.get_runtime_choice(), RuntimeChoice::Node, "Expected Node runtime");
+    match &cli.command {
+      Some(Commands::Lsp {}) => {}
+      _ => panic!("Expected Lsp command, got {:?}", cli.command),
+    }
+  }
+
+  #[test]
+  fn test_parse_global_runtime_without_subcommand() {
+    let cli = Cli::parse_from(["novelsaga", "--runtime", "bun"]);
+    assert_eq!(cli.get_runtime_choice(), RuntimeChoice::Bun, "Expected Bun runtime");
+    assert!(cli.command.is_none(), "Expected no subcommand");
   }
 }
