@@ -15,7 +15,8 @@ nsaga/
 │   ├── cli/               # Rust LSP server & CLI
 │   └── cli-js-bridges/    # TypeScript JSON-RPC bridges
 ├── xtask/                 # Build automation
-└── .opencode/             # AI agent config & progress tracking
+├── .sisyphus/             # OpenCode work plans and notepads
+└── .opencode/             # OpenCode configuration (skills, commands)
 ```
 
 ### Essential Commands
@@ -60,11 +61,10 @@ pnpm exec eslint .         # JS/TS linting
 - **Core Module**: [`projects/core/AGENTS.md`](../projects/core/AGENTS.md)
 - **CLI Module**: [`projects/cli/AGENTS.md`](../projects/cli/AGENTS.md)
 - **JS Bridges**: [`projects/cli-js-bridges/AGENTS.md`](../projects/cli-js-bridges/AGENTS.md)
-- **Progress Tracking**: [`.opencode/docs/`](../.opencode/docs/)
+- **Progress Tracking**: [`.sisyphus/plans/`](../.sisyphus/plans/) and [`.sisyphus/notepads/`](../.sisyphus/notepads/)
 
 ## AI Agent Guidelines
 
 1. **Seek Confirmation**: Ask before significant changes
 2. **Interactive**: Stop at ambiguity, confirm architecture decisions
 3. **Incremental**: Break complex tasks into steps
-4. **Documentation**: Update `.opencode/docs/` after changes

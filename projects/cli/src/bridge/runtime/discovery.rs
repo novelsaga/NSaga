@@ -234,8 +234,8 @@ impl RuntimeDiscovery {
     }
 
     Err(BridgeError::Other(
-      "No JavaScript runtime found. Please install Node.js, Bun, or Deno.".to_string(),
-    ))
+       "未找到任何 JavaScript 运行时\n\n搜索的运行时:\n  - Node.js (https://nodejs.org/)\n  - Bun (https://bun.sh/)\n  - Deno (https://deno.land/)\n\n解决方案:\n  1. 安装上述任意一个运行时\n  2. 确保运行时在 $PATH 中\n  3. 或使用 --runtime 和 --{runtime}-path 指定自定义路径".to_string(),
+     ))
   }
 
   /// 根据用户偏好查找运行时
@@ -262,11 +262,20 @@ impl RuntimeDiscovery {
         RuntimeType::Deno => "Deno",
       };
 
+      let user_path_str = user_path
+        .as_ref()
+        .map(|p| format!("{}", p.display()))
+        .unwrap_or_default();
       self.find_runtime_with_path(runtime_type, user_path)?.ok_or_else(|| {
-        BridgeError::Other(format!(
-          "{runtime_name} runtime not found. Please install it or use --runtime auto"
-        ))
-      })
+         BridgeError::RuntimeNotFound {
+           runtime_type: runtime_name.to_string(),
+           searched_paths: format!("  - $PATH\n  - 用户指定: {user_path_str}"),
+           suggestion: format!(
+             "1. 安装 {runtime_name}\n   - Node.js: https://nodejs.org/\n   - Bun: https://bun.sh/\n   - Deno: https://deno.land/\n2. 确保在 $PATH 中\n3. 或使用 --{} 指定路径",
+             runtime_name.to_lowercase()
+           ),
+         }
+       })
     } else {
       // 未指定运行时，使用自动检测
       self.find_best_runtime()
@@ -288,7 +297,10 @@ impl RuntimeDiscovery {
         if e.kind() == std::io::ErrorKind::NotFound {
           Ok(None)
         } else {
-          Err(BridgeError::IoError(e))
+          Err(BridgeError::IoError {
+            context: format!("Failed to get runtime version from {}", path.display()),
+            source: e,
+          })
         }
       }
     }

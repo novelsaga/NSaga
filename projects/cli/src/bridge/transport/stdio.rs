@@ -55,14 +55,17 @@ impl StdioTransport {
   ///
   /// 如果子进程的 stdin 或 stdout 已被 take 则返回错误
   pub fn from_child(child: &mut Child) -> Result<Self> {
-    let stdin = child
-      .stdin
-      .take()
-      .ok_or_else(|| BridgeError::Other("Failed to take stdin from child process".into()))?;
-    let stdout = child
-      .stdout
-      .take()
-      .ok_or_else(|| BridgeError::Other("Failed to take stdout from child process".into()))?;
+    let stdin = child.stdin.take().ok_or_else(|| {
+      BridgeError::Other(
+        "无法从子进程获取 stdin\n\n原因: stdin 可能已被其他代码取出\n\n解决方案: 检查是否多次调用 from_child()".into(),
+      )
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+      BridgeError::Other(
+        "无法从子进程获取 stdout\n\n原因: stdout 可能已被其他代码取出\n\n解决方案: 检查是否多次调用 from_child()"
+          .into(),
+      )
+    })?;
     Ok(Self::new(stdin, stdout))
   }
 
@@ -71,8 +74,14 @@ impl StdioTransport {
   /// 用于 `RuntimeProcess::take_io()` 返回的已缓冲 IO
   pub fn from_buffered(mut stdin: BufWriter<ChildStdin>, stdout: BufReader<ChildStdout>) -> Result<Self> {
     // 刷新并解包 stdin，直接持有 ChildStdin，避免 BufWriter 在 drop 时的问题
-    stdin.flush().map_err(BridgeError::IoError)?;
-    let inner_stdin = stdin.into_inner().map_err(|e| BridgeError::IoError(e.into_error()))?;
+    stdin.flush().map_err(|e| BridgeError::IoError {
+      context: "Failed to flush buffered stdin".to_string(),
+      source: e,
+    })?;
+    let inner_stdin = stdin.into_inner().map_err(|e| BridgeError::IoError {
+      context: "Failed to unwrap BufWriter from stdin".to_string(),
+      source: e.into_error(),
+    })?;
 
     Ok(Self {
       stdin: Arc::new(Mutex::new(Box::new(inner_stdin))),
@@ -93,8 +102,14 @@ impl Transport for StdioTransport {
     let mut stdin = self.stdin.lock().unwrap();
 
     // 写入 JSON + 换行符
-    writeln!(stdin, "{json}")?;
-    stdin.flush()?;
+    writeln!(stdin, "{json}").map_err(|e| BridgeError::IoError {
+      context: "Failed to write JSON-RPC request to process stdin".to_string(),
+      source: e,
+    })?;
+    stdin.flush().map_err(|e| BridgeError::IoError {
+      context: "Failed to flush process stdin after writing request".to_string(),
+      source: e,
+    })?;
 
     Ok(())
   }
@@ -150,7 +165,10 @@ impl Transport for StdioTransport {
             }
           }
           Err(e) => {
-            let _ = tx.send(Err(BridgeError::IoError(e)));
+            let _ = tx.send(Err(BridgeError::IoError {
+              context: "Failed to read JSON-RPC response from process stdout".to_string(),
+              source: e,
+            }));
             return;
           }
         }

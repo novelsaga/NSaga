@@ -80,12 +80,14 @@ impl RuntimeProcess {
       .stderr(Stdio::inherit()); // stderr 继承，用于调试输出
 
     // 启动进程
-    let mut child = cmd.spawn().map_err(|e| {
-      BridgeError::Other(format!(
-        "Failed to spawn {} process: {}",
+    let mut child = cmd.spawn().map_err(|e| BridgeError::IoError {
+      context: format!(
+        "Failed to spawn {} process\n\n脚本: {}\n运行时: {}",
         runtime_info.runtime_type.executable_name(),
-        e
-      ))
+        script_path.display(),
+        runtime_info.path.display()
+      ),
+      source: e,
     })?;
 
     // 获取 stdin/stdout handles
@@ -96,8 +98,8 @@ impl RuntimeProcess {
       // 清理进程
       let _ = child.kill();
       return Err(BridgeError::Other(
-        "Failed to capture stdin/stdout from child process".to_string(),
-      ));
+         "无法捕获子进程的标准输入/输出\n\n原因: stdin 或 stdout 未能正确初始化\n\n解决方案: 确保有足够的系统资源（文件描述符）".to_string(),
+       ));
     }
 
     Ok(Self {
@@ -150,9 +152,18 @@ impl RuntimeProcess {
   /// 向进程发送数据
   pub fn send(&mut self, data: &str) -> Result<()> {
     if let Some(stdin) = &mut self.stdin {
-      stdin.write_all(data.as_bytes()).map_err(BridgeError::IoError)?;
-      stdin.write_all(b"\n").map_err(BridgeError::IoError)?;
-      stdin.flush().map_err(BridgeError::IoError)?;
+      stdin.write_all(data.as_bytes()).map_err(|e| BridgeError::IoError {
+        context: "Failed to write to process stdin".to_string(),
+        source: e,
+      })?;
+      stdin.write_all(b"\n").map_err(|e| BridgeError::IoError {
+        context: "Failed to write newline to process stdin".to_string(),
+        source: e,
+      })?;
+      stdin.flush().map_err(|e| BridgeError::IoError {
+        context: "Failed to flush process stdin".to_string(),
+        source: e,
+      })?;
       Ok(())
     } else {
       Err(BridgeError::TransportClosed)
@@ -180,8 +191,14 @@ impl RuntimeProcess {
     }
 
     // 超时，强制 kill
-    self.child.kill().map_err(BridgeError::IoError)?;
-    self.child.wait().map_err(BridgeError::IoError)?;
+    self.child.kill().map_err(|e| BridgeError::IoError {
+      context: "Failed to kill process after shutdown timeout".to_string(),
+      source: e,
+    })?;
+    self.child.wait().map_err(|e| BridgeError::IoError {
+      context: "Failed to wait for process after kill".to_string(),
+      source: e,
+    })?;
 
     Ok(())
   }
@@ -189,15 +206,24 @@ impl RuntimeProcess {
   /// 强制杀死进程
   pub fn kill(&mut self) -> Result<()> {
     if self.is_running() {
-      self.child.kill().map_err(BridgeError::IoError)?;
-      self.child.wait().map_err(BridgeError::IoError)?;
+      self.child.kill().map_err(|e| BridgeError::IoError {
+        context: "Failed to kill process".to_string(),
+        source: e,
+      })?;
+      self.child.wait().map_err(|e| BridgeError::IoError {
+        context: "Failed to wait for killed process".to_string(),
+        source: e,
+      })?;
     }
     Ok(())
   }
 
   /// 等待进程退出
   pub fn wait(&mut self) -> Result<()> {
-    self.child.wait().map_err(BridgeError::IoError)?;
+    self.child.wait().map_err(|e| BridgeError::IoError {
+      context: "Failed to wait for process exit".to_string(),
+      source: e,
+    })?;
     Ok(())
   }
 

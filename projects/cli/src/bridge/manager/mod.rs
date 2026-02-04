@@ -119,9 +119,10 @@ impl BridgeManager {
   /// 创建 Bridge（带重试）
   fn create_bridge_with_retry(&self, name: &str) -> Result<Box<dyn Bridge>> {
     let factories = self.factories.lock().unwrap();
-    let factory = factories
-      .get(name)
-      .ok_or_else(|| BridgeError::BridgeNotFound(name.to_string()))?;
+    let factory = factories.get(name).ok_or_else(|| BridgeError::BridgeNotFound {
+      name: name.to_string(),
+      suggestion: "可用的 Bridge:\n  - config-bridge (配置文件加载)".to_string(),
+    })?;
 
     let mut last_error = None;
     for attempt in 1..=self.max_retries {
@@ -274,7 +275,11 @@ mod tests {
       let discovery = RuntimeDiscovery::new();
       let runtime_info = discovery
         .find_runtime(RuntimeType::NodeJs)?
-        .ok_or_else(|| BridgeError::RuntimeNotFound("Node.js".to_string()))?;
+        .ok_or_else(|| BridgeError::RuntimeNotFound {
+          runtime_type: "Node.js".to_string(),
+          searched_paths: "  - $PATH\n  - /usr/bin/node\n  - /usr/local/bin/node".to_string(),
+          suggestion: "解决方案:\n1. 安装 Node.js: https://nodejs.org/\n2. 或使用 --node-path 指定路径".to_string(),
+        })?;
 
       let mut env = HashMap::new();
       env.insert(

@@ -1,5 +1,7 @@
 //! Bridge 统一错误类型定义
 
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 /// Bridge 模块的统一错误类型
@@ -17,9 +19,9 @@ pub enum BridgeError {
     data: Option<serde_json::Value>,
   },
 
-  /// IO 错误
-  #[error("IO error: {0}")]
-  IoError(#[from] std::io::Error),
+  /// IO 错误（带操作上下文）
+  #[error("{context}\n\n原因: {source}")]
+  IoError { context: String, source: std::io::Error },
 
   /// 传输层已关闭
   #[error("Transport closed")]
@@ -40,17 +42,30 @@ pub enum BridgeError {
   #[error("Bridge not initialized")]
   NotInitialized,
 
-  /// Bridge 未找到
-  #[error("Bridge not found: {0}")]
-  BridgeNotFound(String),
+  /// Bridge 未找到（带建议）
+  #[error("未找到 Bridge: {name}\n\n{suggestion}")]
+  BridgeNotFound { name: String, suggestion: String },
 
-  /// 运行时未找到
-  #[error("Runtime not found: {0}")]
-  RuntimeNotFound(String),
+  /// 运行时未找到（带搜索路径和解决方案）
+  #[error("未找到 {runtime_type} 运行时\n\n搜索路径:\n{searched_paths}\n\n解决方案:\n{suggestion}")]
+  RuntimeNotFound {
+    runtime_type: String,
+    searched_paths: String,
+    suggestion: String,
+  },
 
   /// 其他错误
-  #[error("Unknown error: {0}")]
+  #[error("{0}")]
   Other(String),
+}
+
+impl From<std::io::Error> for BridgeError {
+  fn from(err: std::io::Error) -> Self {
+    BridgeError::IoError {
+      context: "IO operation failed".to_string(),
+      source: err,
+    }
+  }
 }
 
 /// Bridge 模块的 Result 类型别名

@@ -44,9 +44,12 @@ impl ConfigBridge {
     let mut process = RuntimeProcess::spawn(runtime_info, bridge_script, env)?;
 
     // 从进程中 take IO 句柄
-    let (stdin, stdout) = process
-      .take_io()
-      .ok_or_else(|| BridgeError::Other("Failed to get IO from RuntimeProcess".to_string()))?;
+    let (stdin, stdout) = process.take_io().ok_or_else(|| {
+      BridgeError::Other(
+        "无法从运行时进程获取 IO\n\n原因: stdin/stdout 可能已被取出\n\n解决方案: 检查 RuntimeProcess 的使用状态"
+          .to_string(),
+      )
+    })?;
 
     // 创建传输层
     let transport = StdioTransport::from_buffered(stdin, stdout)?;

@@ -13,7 +13,7 @@ This command helps maintain up-to-date AI documentation by:
 1. Analyzing git changes (staged, unstaged, or since a specific commit)
 2. Identifying which documentation files need updates
 3. Generating summaries of completed work
-4. Updating the appropriate `.opencode/docs/` files
+4. Appending findings to appropriate `.sisyphus/notepads/` files (plans are orchestrator-managed)
 
 ## Usage Scenarios
 
@@ -65,14 +65,14 @@ Shows what would be updated without making changes.
 
 3. **Determine documentation updates**:
 
-   | Change Type          | Target Documentation                                     |
-   | -------------------- | -------------------------------------------------------- |
-   | Bug fixes            | `.opencode/docs/COMPLETED_TASKS.md`                      |
-   | New features         | `.opencode/docs/COMPLETED_TASKS.md` + relevant AGENTS.md |
-   | Refactoring          | `.opencode/docs/COMPLETED_TASKS.md`                      |
-   | Architecture changes | Root `AGENTS.md` + module AGENTS.md                      |
-   | Build system         | `.opencode/docs/COMPLETED_TASKS.md`                      |
-   | Lint fixes           | `.opencode/docs/COMPLETED_TASKS.md`                      |
+   | Change Type          | Target Documentation                         |
+   | -------------------- | -------------------------------------------- |
+   | Bug fixes            | `.sisyphus/notepads/{category}/learnings.md` |
+   | New features         | `.sisyphus/notepads/{category}/learnings.md` |
+   | Refactoring          | `.sisyphus/notepads/{category}/learnings.md` |
+   | Architecture changes | Root `AGENTS.md` + module AGENTS.md          |
+   | Build system         | `.sisyphus/notepads/{category}/learnings.md` |
+   | Lint fixes           | `.sisyphus/notepads/{category}/learnings.md` |
 
 4. **Generate summary** - Create a structured summary following the format in COMPLETED_TASKS.md:
 
@@ -87,15 +87,21 @@ Shows what would be updated without making changes.
    - ✅ [Change 2]
    ```
 
-5. **Update documentation** - Append to the appropriate section in `.opencode/docs/COMPLETED_TASKS.md`
+5. **Update documentation** - Append to the appropriate section in `.sisyphus/notepads/{category}/learnings.md`
 
 ## Documentation Structure
 
 ```
-.opencode/docs/
-├── COMPLETED_TASKS.md   # Historical record of completed work
-├── NEXT_STEPS.md        # Current priorities and upcoming tasks
-└── BACKLOG.md           # Future ideas and deferred tasks
+.sisyphus/
+├── plans/                          # Work plans (git tracked)
+│   ├── cli-next-steps.md           # Current priorities
+│   ├── completed-stability-quality.md  # Historical archive
+│   └── future-enhancements.md      # Backlog
+└── notepads/                       # Learning notes (gitignored)
+    ├── {category}/
+    │   ├── learnings.md            # Accumulated learnings
+    │   ├── issues.md               # Known issues and blockers
+    │   └── decisions.md            # Architectural decisions
 ```
 
 ## AGENTS.md Hierarchy
@@ -145,6 +151,6 @@ For a lint fix session, the output might be:
 !`git diff HEAD~1 --stat 2>/dev/null | tail -10 || echo "Cannot determine changes"`
 </changed_files_since_last_commit>
 <docs_last_modified>
-!`ls -la .opencode/docs/*.md 2>/dev/null || echo "No docs found"`
+!`ls -la .sisyphus/plans/*.md .sisyphus/notepads/*/ 2>/dev/null || echo "No docs found"`
 </docs_last_modified>
 </current-context>
