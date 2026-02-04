@@ -6,3 +6,10 @@ out
 result
 examples
 node_modules
+
+# Sisyphus orchestration state (runtime only)
+# Plans are tracked in git as documentation
+.sisyphus/boulder.json
+.sisyphus/drafts/
+.sisyphus/evidence/
+.sisyphus/notepads/
