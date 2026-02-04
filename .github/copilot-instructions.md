@@ -61,7 +61,7 @@ pnpm exec eslint .         # JS/TS linting
 - **Core Module**: [`projects/core/AGENTS.md`](../projects/core/AGENTS.md)
 - **CLI Module**: [`projects/cli/AGENTS.md`](../projects/cli/AGENTS.md)
 - **JS Bridges**: [`projects/cli-js-bridges/AGENTS.md`](../projects/cli-js-bridges/AGENTS.md)
-- **Progress Tracking**: [`.sisyphus/plans/`](../.sisyphus/plans/) and [`.sisyphus/notepads/`](../.sisyphus/notepads/)
+- **Progress Tracking**: [`.sisyphus/roadmaps/`](../.sisyphus/roadmaps/) and [`.sisyphus/plans/`](../.sisyphus/plans/)
 
 ## AI Agent Guidelines
 

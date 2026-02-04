@@ -30,20 +30,20 @@ impl std::str::FromStr for RuntimeChoice {
   }
 }
 
-/// Subcommands for NovelSaga CLI
+/// Subcommands for `NovelSaga` CLI
 #[derive(Subcommand, Clone, Debug)]
 pub enum Commands {
   /// Start as LSP server (communicates via stdin/stdout)
   Lsp {},
 
-  /// Initialize a new NovelSaga project
+  /// Initialize a new `NovelSaga` project
   Init {
     /// Project directory (default: current directory)
     #[arg(default_value = ".")]
     path: PathBuf,
   },
 
-  /// Format NovelSaga configuration files
+  /// Format `NovelSaga` configuration files
   Format {
     /// Files to format (default: auto-detect)
     #[arg()]

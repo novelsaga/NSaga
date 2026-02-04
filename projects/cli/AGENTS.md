@@ -101,15 +101,56 @@ Finds JS bridge assets in development and release builds:
 ## CLI Arguments
 
 ```bash
-novelsaga [OPTIONS]
+novelsaga [OPTIONS] [COMMAND]
 
-Options:
+Commands:
+  lsp      Start as LSP server (communicates via stdin/stdout)
+  init     Initialize a new NovelSaga project
+  format   Format NovelSaga configuration files
+  check    Check configuration files for errors
+
+Global Options (work with all commands):
   --runtime <TYPE>     Runtime: auto, node, bun, deno (default: auto)
   --node-path <PATH>   Custom Node.js executable path
   --bun-path <PATH>    Custom Bun executable path
   --deno-path <PATH>   Custom Deno executable path
   --help               Show help
   --version            Show version
+```
+
+### Subcommand Examples
+
+```bash
+# Start LSP server (default mode for editors)
+novelsaga lsp
+
+# Start LSP with specific runtime
+novelsaga --runtime node lsp
+
+# Initialize project (placeholder)
+novelsaga init /path/to/project
+
+# Format config files (placeholder)
+novelsaga format --check
+
+# Check config for errors (placeholder)
+novelsaga check
+```
+
+### No Subcommand Behavior
+
+When run without a subcommand, displays status information:
+
+```bash
+$ novelsaga
+NovelSaga v0.1.0
+
+Runtime Configuration:
+  Selected: Auto
+
+Config: not loaded (run in project directory)
+
+Run 'novelsaga --help' for available commands.
 ```
 
 ## Environment Variables
@@ -161,5 +202,48 @@ struct Args {
 Set log level and run manually:
 
 ```bash
-RUST_LOG=debug cargo run -p novelsaga-cli -- --runtime node
+RUST_LOG=debug novelsaga --runtime node lsp
+```
+
+## Args Module Structure
+
+The `args/mod.rs` defines CLI structure using clap derive:
+
+```rust
+// Subcommands enum
+#[derive(Subcommand, Clone, Debug)]
+pub enum Commands {
+    Lsp {},                              // LSP server mode
+    Init { path: PathBuf },              // Project initialization
+    Format { files: Vec<PathBuf>, check: bool },  // Config formatting
+    Check { files: Vec<PathBuf> },       // Config validation
+}
+
+// Main CLI struct
+#[derive(Parser, Clone)]
+pub struct Cli {
+    #[arg(long, global = true)]          // Global args work with all subcommands
+    runtime: RuntimeChoice,
+
+    #[command(subcommand)]
+    pub command: Option<Commands>,       // None = show status info
+}
+```
+
+### Testing CLI Arguments
+
+Unit tests use `Cli::parse_from()` for mock parsing:
+
+```rust
+#[test]
+fn test_parse_lsp_subcommand() {
+    let cli = Cli::parse_from(["novelsaga", "lsp"]);
+    assert!(matches!(cli.command, Some(Commands::Lsp {})));
+}
+
+#[test]
+fn test_parse_global_runtime_with_subcommand() {
+    let cli = Cli::parse_from(["novelsaga", "--runtime", "node", "lsp"]);
+    assert_eq!(cli.get_runtime_choice(), RuntimeChoice::Node);
+}
 ```

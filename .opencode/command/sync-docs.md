@@ -13,7 +13,7 @@ This command helps maintain up-to-date AI documentation by:
 1. Analyzing git changes (staged, unstaged, or since a specific commit)
 2. Identifying which documentation files need updates
 3. Generating summaries of completed work
-4. Appending findings to appropriate `.sisyphus/notepads/` files (plans are orchestrator-managed)
+4. Appending findings to appropriate `.sisyphus/notepads/{plan-name}/` files
 
 ## Usage Scenarios
 
@@ -61,55 +61,75 @@ Shows what would be updated without making changes.
    - `projects/core/src/` → Core changes, may need `projects/core/AGENTS.md` update
    - `xtask/` → Build system changes
    - `.opencode/` → Command/skill changes
+   - `.sisyphus/plans/` → Boulder plan changes
+   - `.sisyphus/roadmaps/` → Priority/design doc changes
    - Config files (Cargo.toml, package.json, etc.) → Dependency changes
 
 3. **Determine documentation updates**:
 
-   | Change Type          | Target Documentation                         |
-   | -------------------- | -------------------------------------------- |
-   | Bug fixes            | `.sisyphus/notepads/{category}/learnings.md` |
-   | New features         | `.sisyphus/notepads/{category}/learnings.md` |
-   | Refactoring          | `.sisyphus/notepads/{category}/learnings.md` |
-   | Architecture changes | Root `AGENTS.md` + module AGENTS.md          |
-   | Build system         | `.sisyphus/notepads/{category}/learnings.md` |
-   | Lint fixes           | `.sisyphus/notepads/{category}/learnings.md` |
+   | Change Type          | Target Documentation                          |
+   | -------------------- | --------------------------------------------- |
+   | Bug fixes            | `.sisyphus/notepads/{plan-name}/learnings.md` |
+   | New features         | `.sisyphus/notepads/{plan-name}/learnings.md` |
+   | Refactoring          | `.sisyphus/notepads/{plan-name}/learnings.md` |
+   | Architecture changes | Root `AGENTS.md` + module AGENTS.md           |
+   | Build system         | `.sisyphus/notepads/{plan-name}/learnings.md` |
+   | Lint fixes           | `.sisyphus/notepads/{plan-name}/learnings.md` |
+   | Priority completion  | `.sisyphus/roadmaps/cli-next-steps.md`        |
+   | Design decisions     | `.sisyphus/roadmaps/` design spec files       |
 
-4. **Generate summary** - Create a structured summary following the format in COMPLETED_TASKS.md:
+4. **Generate summary** - Create a structured summary:
 
    ```markdown
-   #### ~~任务: [Task Title]~~ ✅ 已完成 (YYYY-MM-DD)
+   ## [YYYY-MM-DD] Task Title
 
-   **文件**: [list of modified files]
+   ### Changes Made
 
-   **实现内容**:
+   - File 1: Description of change
+   - File 2: Description of change
 
-   - ✅ [Change 1]
-   - ✅ [Change 2]
+   ### Verification
+
+   - Command run and result
+
+   ### Key Learnings
+
+   - Pattern discovered or gotcha avoided
    ```
 
-5. **Update documentation** - Append to the appropriate section in `.sisyphus/notepads/{category}/learnings.md`
+5. **Update documentation** - Append to `.sisyphus/notepads/{plan-name}/learnings.md`
 
 ## Documentation Structure
 
 ```
 .sisyphus/
-├── plans/                          # Work plans (git tracked)
-│   ├── cli-next-steps.md           # Current priorities
-│   ├── completed-stability-quality.md  # Historical archive
-│   └── future-enhancements.md      # Backlog
-└── notepads/                       # Learning notes (gitignored)
-    ├── {category}/
-    │   ├── learnings.md            # Accumulated learnings
-    │   ├── issues.md               # Known issues and blockers
-    │   └── decisions.md            # Architectural decisions
+├── plans/                              # Executable boulder plans (git tracked)
+│   ├── archive/                        # Completed plans
+│   │   ├── cli-subcommand-base.md
+│   │   ├── completed-stability-quality.md
+│   │   └── docs-migration.md
+│   ├── cli-init-subcommand.md          # Example: init command plan
+│   ├── cli-lsp-network-params.md       # Example: LSP params plan
+│   └── ...
+├── roadmaps/                           # Project planning docs (git tracked)
+│   ├── cli-next-steps.md               # P1/P2/P3 priority roadmap
+│   ├── p2-metadata-manager-breakdown.md # Design spec
+│   ├── p3-lsp-integration-breakdown.md  # Design spec
+│   └── future-enhancements.md          # Backlog/wishlist
+├── notepads/                           # Learning notes (gitignored)
+│   └── {plan-name}/                    # One folder per active plan
+│       ├── learnings.md                # Accumulated learnings
+│       ├── issues.md                   # Known issues and blockers
+│       └── decisions.md                # Architectural decisions
+└── boulder.json                        # Active plan state (gitignored)
 ```
 
 ## AGENTS.md Hierarchy
 
 ```
-AGENTS.md (root)           # Project overview, quick commands
-├── projects/cli/AGENTS.md        # CLI module details
-├── projects/core/AGENTS.md       # Core library details
+AGENTS.md (root)                       # Project overview, quick commands
+├── projects/cli/AGENTS.md             # CLI module details
+├── projects/core/AGENTS.md            # Core library details
 └── projects/cli-js-bridges/AGENTS.md  # JS bridges details
 ```
 
@@ -119,23 +139,29 @@ AGENTS.md (root)           # Project overview, quick commands
 2. **Use consistent format** - Follow existing documentation patterns
 3. **Date entries** - Include completion dates for tracking
 4. **Link files** - Reference modified files with relative paths
-5. **Categorize properly** - Group related changes together
+5. **Match plan name** - Use the active plan name for notepad folder
 
 ## Example Output
 
-For a lint fix session, the output might be:
+For a CLI refactor session with plan `cli-subcommand-base`:
 
 ```markdown
-### 代码质量清理 (2026-02-XX)
+## [2026-02-05] Task 2 - Update main.rs
 
-#### ~~任务: Rust Clippy 警告修复~~ ✅ 已完成
+### Changes Made
 
-**修复内容**: 从 30+ warnings 降至 0 warnings
+- `projects/cli/src/main.rs`: Added command dispatch match expression
+- `projects/cli/src/main.rs`: Added `print_status_info()` function
 
-**文件修改**:
+### Verification
 
-- `projects/cli/src/bridge/manager/mod.rs` - 移除不必要的 Result 包装
-- `projects/cli/src/config/loader.rs` - 类型别名重构减少复杂度
+- `cargo build -p novelsaga-cli`: SUCCESS
+- `cargo test -p novelsaga-cli`: 15 passed, 0 failed
+
+### Key Learnings
+
+- Match on `Option<Commands>` allows clean None handling for status display
+- `todo!()` macros with context show expected args during development
 ```
 
 </command-instruction>
@@ -150,7 +176,10 @@ For a lint fix session, the output might be:
 <changed_files_since_last_commit>
 !`git diff HEAD~1 --stat 2>/dev/null | tail -10 || echo "Cannot determine changes"`
 </changed_files_since_last_commit>
+<active_boulder>
+!`cat .sisyphus/boulder.json 2>/dev/null || echo "No active boulder"`
+</active_boulder>
 <docs_last_modified>
-!`ls -la .sisyphus/plans/*.md .sisyphus/notepads/*/ 2>/dev/null || echo "No docs found"`
+!`ls -la .sisyphus/plans/*.md .sisyphus/roadmaps/*.md 2>/dev/null | head -15 || echo "No plans found"`
 </docs_last_modified>
 </current-context>

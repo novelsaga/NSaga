@@ -105,7 +105,7 @@ nix build .#bundle                    # Build all platforms
 
 ### Documentation
 
-- AI-generated docs: `.opencode/docs/` (progress tracking)
+- AI-generated docs: `.sisyphus/notepads/` (session working memory)
 - After refactoring: ALWAYS update related docs
 - Never scatter docs across project
 
@@ -117,9 +117,9 @@ nix build .#bundle                    # Build all platforms
 
 ## PROGRESS TRACKING
 
-- **Current Status**: See `.opencode/docs/NEXT_STEPS.md`
-- **Completed Tasks**: See `.opencode/docs/COMPLETED_TASKS.md`
-- **Backlog**: See `.opencode/docs/BACKLOG.md`
+- **Roadmaps**: See `.sisyphus/roadmaps/` (priorities, design specs, backlog)
+- **Active Plans**: See `.sisyphus/plans/` (executable boulder plans)
+- **Archived Plans**: See `.sisyphus/plans/archive/`
 
 ## VSCODE DEVELOPMENT
 
