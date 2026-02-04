@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use path_absolutize::Absolutize;
 
 /// JavaScript 运行时选择
@@ -30,30 +30,61 @@ impl std::str::FromStr for RuntimeChoice {
   }
 }
 
+/// Subcommands for NovelSaga CLI
+#[derive(Subcommand, Clone)]
+pub enum Commands {
+  /// Start as LSP server (communicates via stdin/stdout)
+  Lsp {},
+
+  /// Initialize a new NovelSaga project
+  Init {
+    /// Project directory (default: current directory)
+    #[arg(default_value = ".")]
+    path: PathBuf,
+  },
+
+  /// Format NovelSaga configuration files
+  Format {
+    /// Files to format (default: auto-detect)
+    #[arg()]
+    files: Vec<PathBuf>,
+
+    /// Check only, don't modify files
+    #[arg(long)]
+    check: bool,
+  },
+
+  /// Check configuration files for errors
+  Check {
+    /// Files to check (default: auto-detect)
+    #[arg()]
+    files: Vec<PathBuf>,
+  },
+}
+
 #[derive(Parser)]
-#[command(name = "novelsaga_server")]
+#[command(name = "novelsaga")]
 #[command(about = "NovelSaga Language Server", long_about = None)]
 #[derive(Clone)]
 pub struct Cli {
-  /// Start as LSP server (communicates via stdin/stdout)
-  #[arg(long)]
-  pub lsp: bool,
-
   /// Choose JavaScript runtime (auto, node, bun, deno)
-  #[arg(long, default_value = "auto", value_name = "RUNTIME")]
+  #[arg(long, default_value = "auto", value_name = "RUNTIME", global = true)]
   runtime: RuntimeChoice,
 
   /// Path to the Node.js executable (overrides automatic detection)
-  #[arg(long)]
+  #[arg(long, global = true)]
   node_path: Option<PathBuf>,
 
   /// Path to the Bun executable (overrides automatic detection)
-  #[arg(long)]
+  #[arg(long, global = true)]
   bun_path: Option<PathBuf>,
 
   /// Path to the Deno executable (overrides automatic detection)
-  #[arg(long)]
+  #[arg(long, global = true)]
   deno_path: Option<PathBuf>,
+
+  #[command(subcommand)]
+  pub command: Option<Commands>,
 }
 
 impl Cli {

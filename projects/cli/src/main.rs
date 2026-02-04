@@ -4,7 +4,11 @@ use std::sync::Arc;
 
 use novelsaga_core::state::{feat::Feature, init::Initializer};
 
-use crate::{args::Cli, bridge::BridgeManager, config::loader::ConfigLoader};
+use crate::{
+  args::{Cli, Commands},
+  bridge::BridgeManager,
+  config::loader::ConfigLoader,
+};
 
 mod args;
 mod assets;
@@ -30,7 +34,45 @@ async fn main() {
   let feature = Feature::new(js_loader, ts_loader);
   Initializer::init(feature).expect("Failed to initialize");
 
-  if cli.lsp {
-    lsp::start().await;
+  match &cli.command {
+    Some(Commands::Lsp {}) => {
+      lsp::start().await;
+    }
+    Some(Commands::Init { path }) => {
+      todo!("Init command not implemented yet. Path: {:?}", path);
+    }
+    Some(Commands::Format { files, check }) => {
+      todo!(
+        "Format command not implemented yet. Files: {:?}, Check: {}",
+        files,
+        check
+      );
+    }
+    Some(Commands::Check { files }) => {
+      todo!("Check command not implemented yet. Files: {:?}", files);
+    }
+    None => {
+      print_status_info(&cli);
+    }
   }
+}
+
+fn print_status_info(cli: &Cli) {
+  println!("NovelSaga v{}", env!("CARGO_PKG_VERSION"));
+  println!();
+  println!("Runtime Configuration:");
+  println!("  Selected: {:?}", cli.get_runtime_choice());
+  if let Some(path) = cli.get_node_path() {
+    println!("  Node.js: {}", path.display());
+  }
+  if let Some(path) = cli.get_bun_path() {
+    println!("  Bun: {}", path.display());
+  }
+  if let Some(path) = cli.get_deno_path() {
+    println!("  Deno: {}", path.display());
+  }
+  println!();
+  println!("Config: not loaded (run in project directory)");
+  println!();
+  println!("Run 'novelsaga --help' for available commands.");
 }
