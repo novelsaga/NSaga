@@ -13,6 +13,7 @@
     "@types/micromatch": "^4.0.10",
     "@types/node": "^24.10.4",
     "@types/ramda": "^0.31.1",
+    "@types/semver": "^7.7.1",
     "@typescript/native-preview": "^7.0.0-dev",
     "esbuild": "^0.27.2",
     "eslint": "^9.39.2",
