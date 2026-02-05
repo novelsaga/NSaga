@@ -112,7 +112,7 @@ export async function buildBridge(options: BuildOptions): Promise<void> {
     // 2. 生成 .d.ts 文件
     if (generateDts) {
       console.log('📝 Generating .d.ts files...')
-      await execAsync('npx tsc --emitDeclarationOnly', { cwd: rootDir })
+      await execAsync('pnpm exec tsc --emitDeclarationOnly', { cwd: rootDir })
     }
 
     // 执行 postBuild 钩子
