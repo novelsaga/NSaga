@@ -143,7 +143,7 @@ Loads JS/TS config files and returns to Rust:
    })
    ```
 
-6. Build: `./xtask.sh build-js`
+6. Build: `xtask build-js`
 
 7. Register in Rust `BridgeManager`
 
@@ -171,10 +171,10 @@ Loads JS/TS config files and returns to Rust:
 
 ```bash
 # Build all bridges (incremental)
-./xtask.sh build-js
+xtask build-js
 
 # Force rebuild all
-./xtask.sh build-js --force
+xtask build-js --force
 
 # Build specific bridge manually
 cd projects/cli-js-bridges/config-bridge

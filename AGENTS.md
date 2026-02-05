@@ -41,16 +41,16 @@ direnv allow                          # Load Nix environment
 
 # Build
 pnpm install                          # Install JS deps (root only!)
-./xtask.sh build-js                   # Build JS bridges (includes type generation)
-./xtask.sh cli                        # Build CLI (current platform)
-./xtask.sh build-all                  # Build everything
+xtask build-js                        # Build JS bridges (includes type generation)
+xtask cli                             # Build CLI (current platform)
+xtask build-all                       # Build everything
 cargo build                           # Rust build
 
 # Test
 cargo test                            # All Rust tests
 cargo test -p novelsaga-cli           # CLI tests only
 cargo test <test_name> -- --ignored   # Run ignored integration tests
-./xtask.sh e2e                        # End-to-end tests
+xtask e2e                             # End-to-end tests
 
 # Lint & Format
 cargo clippy --all-targets            # Rust linting
@@ -174,7 +174,7 @@ nix build .#bundle                    # Build all platforms
 | ------------------------- | ---------------------------------------------------------------- |
 | rust-analyzer not loading | Run `direnv allow`, then reload window (`⌘⇧P` → "Reload Window") |
 | ESLint not working        | Verify `pnpm install` completed at root                          |
-| Types seem outdated       | Run `./xtask.sh build-js` to regenerate                          |
+| Types seem outdated       | Run `xtask build-js` to regenerate                               |
 | Nix env not active        | Check terminal shows Nix-provided tools                          |
 | Extensions not installed  | `⌘⇧P` → "Extensions: Show Recommended Extensions"                |
 

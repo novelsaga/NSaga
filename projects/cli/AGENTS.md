@@ -173,7 +173,7 @@ cargo test -p novelsaga-cli
 cargo test -p novelsaga-cli test_bridge_manager -- --ignored
 
 # E2E tests (via xtask)
-./xtask.sh e2e
+xtask e2e
 ```
 
 ## Common Tasks

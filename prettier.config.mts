@@ -25,7 +25,6 @@ if (!lockfile?.importers) {
 const importerId = getLockfileImporterId(workspaceRoot, import.meta.dirname)
 const rootImporter = lockfile.importers[importerId]
 const rawVersion = rootImporter.devDependencies?.['typescript'] ?? '5.0.0'
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
 const parsed = parse(rawVersion)
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/restrict-template-expressions, @typescript-eslint/no-explicit-any
 const typescriptVer = parsed ? `${(parsed as any).major}.${(parsed as any).minor}.${(parsed as any).patch}` : '5.0.0'

@@ -155,6 +155,9 @@
               ];
             };
           };
+          scripts = {
+            xtask.exec = ''exec cargo run --package xtask --bin xtask -- "$@"'';
+          };
           git-hooks.hooks = {
             commitizen.enable = true;
             clippy = {
