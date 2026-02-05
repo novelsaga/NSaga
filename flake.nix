@@ -72,7 +72,7 @@
           overlays = [(import rust-overlay)];
         };
         imports = [
-          ./packages.nix
+          ./nix/packages.nix
         ];
         devenv.shells.default = {
           name = "novelsaga";
@@ -124,8 +124,7 @@
           languages = {
             javascript = {
               enable = true;
-              package =
-                pkgs.nodejs-slim_24;
+              package = pkgs.nodejs-slim_24;
               pnpm.enable = true;
             };
             nix = {

@@ -21,8 +21,8 @@
   pnpmDeps = pname:
     pkgs.fetchPnpmDeps {
       inherit pname;
-      src = ./.;
-      hash = "sha256-eXdng0f5qaS1HYerv4HYyDm4A5blZkLqUblRFic8edE=";
+      src = ../.;
+      hash = (builtins.fromJSON (builtins.readFile ./hashes.json)).pnpmDeps.${pkgs.system};
       fetcherVersion = 3;
     };
   license = with lib.licenses; [
@@ -31,10 +31,10 @@
   ];
 
   commonArgs = {
-    version = (lib.importTOML ./Cargo.toml).workspace.package.version;
-    src = ./.;
+    version = (lib.importTOML ../Cargo.toml).workspace.package.version;
+    src = ../.;
     cargoLock = {
-      lockFile = ./Cargo.lock;
+      lockFile = ../Cargo.lock;
     };
     cargo = rustToolchain;
     rustc = rustToolchain;

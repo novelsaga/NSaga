@@ -1,0 +1,8 @@
+{
+  "pnpmDeps": {
+    "x86_64-linux": "sha256-eXdng0f5qaS1HYerv4HYyDm4A5blZkLqUblRFic8edE=",
+    "aarch64-linux": "sha256-PLACEHOLDER",
+    "x86_64-darwin": "sha256-PLACEHOLDER",
+    "aarch64-darwin": "sha256-PLACEHOLDER"
+  }
+}

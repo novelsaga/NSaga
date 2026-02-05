@@ -1,0 +1,133 @@
+name: Update pnpm hash
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'packages/*/package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  compute-hash:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: x86_64-darwin
+            runner: macos-13
+          - system: aarch64-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nix
+        uses: cachix/install-nix-action@v26
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Compute pnpm hash
+        id: hash
+        env:
+          SYSTEM: ${{ matrix.system }}
+        run: |
+          set -euo pipefail
+
+          BUILD_LOG=$(mktemp)
+          trap 'rm -f "$BUILD_LOG"' EXIT
+
+          # Set fake hash to trigger hash mismatch and reveal correct hash
+          jq --arg sys "$SYSTEM" '.pnpmDeps[$sys] = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="' \
+            nix/hashes.json > nix/hashes.json.tmp && \
+            mv nix/hashes.json.tmp nix/hashes.json
+
+          # Build bundle to extract real hash
+          nix build ".#bundle" --no-link 2>&1 | tee "$BUILD_LOG" || true
+
+          # Extract hash from build log
+          HASH="$(grep -oE 'sha256-[A-Za-z0-9+/=]+' "$BUILD_LOG" | grep -v 'AAAAAAAAAAAAAAAAAAAAAAAA' | head -n1 || true)"
+
+          if [ -z "$HASH" ]; then
+            echo "::error::Failed to compute hash for ${SYSTEM}"
+            cat "$BUILD_LOG"
+            exit 1
+          fi
+
+          echo "$HASH" > hash.txt
+          echo "Computed hash for ${SYSTEM}: $HASH"
+
+      - name: Upload hash
+        uses: actions/upload-artifact@v4
+        with:
+          name: hash-${{ matrix.system }}
+          path: hash.txt
+          retention-days: 1
+
+  update-hashes:
+    needs: compute-hash
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download hash artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: hashes
+          pattern: hash-*
+
+      - name: Update hashes.json
+        run: |
+          set -euo pipefail
+
+          HASH_FILE="nix/hashes.json"
+
+          for SYSTEM in x86_64-linux aarch64-linux x86_64-darwin aarch64-darwin; do
+            FILE="hashes/hash-${SYSTEM}/hash.txt"
+            if [ -f "$FILE" ]; then
+              HASH="$(tr -d '[:space:]' < "$FILE")"
+              echo "${SYSTEM}: ${HASH}"
+              jq --arg sys "$SYSTEM" --arg hash "$HASH" '.pnpmDeps[$sys] = $hash' "$HASH_FILE" > tmp.json
+              mv tmp.json "$HASH_FILE"
+            else
+              echo "::warning::Missing hash for ${SYSTEM}"
+            fi
+          done
+
+          cat "$HASH_FILE"
+
+      - name: Commit changes
+        run: |
+          set -euo pipefail
+
+          HASH_FILE="nix/hashes.json"
+
+          if [ -z "$(git status --short -- "$HASH_FILE")" ]; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add "$HASH_FILE"
+          git commit -m "chore: update pnpm hash"
+
+          git pull --rebase --autostash origin main || true
+          git push origin HEAD:main
