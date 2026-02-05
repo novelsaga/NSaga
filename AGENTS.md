@@ -178,6 +178,47 @@ nix build .#bundle                    # Build all platforms
 | Nix env not active        | Check terminal shows Nix-provided tools                          |
 | Extensions not installed  | `⌘⇧P` → "Extensions: Show Recommended Extensions"                |
 
+## OPENCODE SKILLS
+
+The OpenCode skills system provides AI agents with specialized knowledge for different development tasks. Each skill contains best practices, anti-patterns, and clear guidance on when to use it.
+
+### Available Skills
+
+**Core Development**
+
+- [`core-dev`](.opencode/skills/core-dev/SKILL.md) - Rust core library development, state management, type exports
+- [`cli-dev`](.opencode/skills/cli-dev/SKILL.md) - CLI and bridge management, command structure
+- [`lsp-dev`](.opencode/skills/lsp-dev/SKILL.md) - LSP protocol implementation and language server features
+- [`ts-bridge`](.opencode/skills/ts-bridge/SKILL.md) - TypeScript bridges and JSON-RPC services
+- [`ffi-diplomat`](.opencode/skills/ffi-diplomat/SKILL.md) - FFI bindings using Diplomat
+
+**Build & Environment**
+
+- [`nix-env`](.opencode/skills/nix-env/SKILL.md) - Nix development environment setup
+- [`nix-build`](.opencode/skills/nix-build/SKILL.md) - Nix build system and reproducible builds
+- [`nix-workflow`](.opencode/skills/nix-workflow/SKILL.md) - Complete Nix environment and build workflows
+
+**Project Guidance**
+
+- [`project-architecture`](.opencode/skills/project-architecture/SKILL.md) - Module relationships and system design
+- [`end-to-end-workflow`](.opencode/skills/end-to-end-workflow/SKILL.md) - Decision tree for feature development
+- [`testing-guide`](.opencode/skills/testing-guide/SKILL.md) - NovelSaga testing patterns
+
+**Maintenance**
+
+- [`docs-maintenance`](.opencode/skills/docs-maintenance/SKILL.md) - Documentation maintenance and plan archiving
+
+### Using Skills
+
+Skills are designed to be loaded based on the task context:
+
+- Single task: Load one specific skill
+- Multi-faceted task: Load multiple related skills
+- New feature: Load `end-to-end-workflow` + component skills
+- Architecture questions: Load `project-architecture` + relevant skills
+
+See [`.opencode/skills/README.md`](.opencode/skills/README.md) for detailed skill selection guide and usage examples.
+
 ## MODULE GUIDES
 
 For detailed module-specific information, see:
