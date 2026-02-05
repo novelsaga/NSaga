@@ -53,12 +53,8 @@ jobs:
           trap 'rm -f "$BUILD_LOG"' EXIT
 
           # Set fake hash to trigger hash mismatch and reveal correct hash
-          jq --arg sys "$SYSTEM" '.pnpmDeps[$sys] = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="' \
-            nix/hashes.json > nix/hashes.json.tmp && \
-            mv nix/hashes.json.tmp nix/hashes.json
-
-          # Build bundle to extract real hash
-          nix build ".#bundle" --no-link 2>&1 | tee "$BUILD_LOG" || true
+          # This target doesn't depend on Android NDK, so it works on all platforms
+          nix build ".#pnpmHashUpdater" --no-link 2>&1 | tee "$BUILD_LOG" || true
 
           # Extract hash from build log
           HASH="$(grep -oE 'sha256-[A-Za-z0-9+/=]+' "$BUILD_LOG" | grep -v 'AAAAAAAAAAAAAAAAAAAAAAAA' | head -n1 || true)"
