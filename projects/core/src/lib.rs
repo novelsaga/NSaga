@@ -4,4 +4,5 @@ pub mod diplomat_ffi;
 pub mod article;
 pub mod config;
 pub mod library;
+pub mod metadata;
 pub mod state;
