@@ -37,6 +37,7 @@ const commonIgnores = [
   '**/out/**/*',
   '**/target/**/*',
   '**/deno.d.ts',
+  '**/bindings/_*.ts',
 ]
 
 const getRootAndSrcTS = (root: string) => [`${root}/src/**/*.{ts,cts,mts}`, `${root}/*.{ts,cts,mts}`]

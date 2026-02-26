@@ -9,6 +9,8 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "noEmit": false,
     "outDir": "./dist",
     "rootDir": "./src",
     "types": ["bun"]
