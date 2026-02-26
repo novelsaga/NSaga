@@ -22,7 +22,7 @@
     pkgs.fetchPnpmDeps {
       inherit pname;
       src = ../.;
-      hash = (builtins.fromJSON (builtins.readFile ./hashes.json)).pnpmDeps.${pkgs.system};
+      hash = (builtins.fromJSON (builtins.readFile ./hashes.json)).pnpmDeps.${pkgs.stdenv.hostPlatform.system};
       fetcherVersion = 3;
     };
   license = with lib.licenses; [
@@ -115,7 +115,7 @@ in {
     cli = default;
 
     bundle =
-      if pkgs.system == "x86_64-linux"
+      if pkgs.stdenv.hostPlatform.system == "x86_64-linux"
       then
         pkgs.rustPlatform.buildRustPackage (
           commonArgs

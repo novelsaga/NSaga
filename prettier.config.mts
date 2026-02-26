@@ -26,8 +26,7 @@ const importerId = getLockfileImporterId(workspaceRoot, import.meta.dirname)
 const rootImporter = lockfile.importers[importerId]
 const rawVersion = rootImporter.devDependencies?.['typescript'] ?? '5.0.0'
 const parsed = parse(rawVersion)
-// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/restrict-template-expressions, @typescript-eslint/no-explicit-any
-const typescriptVer = parsed ? `${(parsed as any).major}.${(parsed as any).minor}.${(parsed as any).patch}` : '5.0.0'
+const typescriptVer = parsed ? `${parsed.major}.${parsed.minor}.${parsed.patch}` : '5.0.0'
 
 const jsCommon: PrettierPluginSortImportsConfig & PrettierPluginJsdocOptions = {
   singleQuote: true,
