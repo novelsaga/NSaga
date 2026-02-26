@@ -1,33 +1,4 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "lsp": {
-    "rust": {
-      "env": {
-        "RUST_LOG": "debug"
-      },
-      "command": ["rust-analyzer"]
-    },
-    "typescript": {
-      "initialization": {
-        "preferences": {
-          "importModuleSpecifierPreference": "relative"
-        }
-      },
-      "command": ["tsgo"]
-    },
-    "nil": {
-      "command": ["nil"],
-      "extensions": [".nix"]
-    },
-    "nixd": {
-      "disabled": true
-    }
-  },
-  "tui": {
-    "scroll_acceleration": {
-      "enabled": true
-    }
-  },
-  "mcp": {
-  }
+  "mcp": {}
 }

@@ -25,14 +25,15 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    rustowl-flake = {
-      url = "github:nix-community/rustowl-flake";
-      inputs = {
-        flake-parts.follows = "flake-parts";
-        nixpkgs.follows = "nixpkgs";
-        rust-overlay.follows = "rust-overlay";
-      };
-    };
+    # rustowl-flake = {
+    #   url = "github:nix-community/rustowl-flake";
+    #   inputs = {
+    #     flake-parts.follows = "flake-parts";
+    #     nixpkgs.follows = "nixpkgs";
+    #     rust-overlay.follows = "rust-overlay";
+    #   };
+    # };
+    nix-vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
   };
 
   nixConfig = {
@@ -45,12 +46,14 @@
     devenv-root,
     treefmt-nix,
     rust-overlay,
+    nix-vscode-extensions,
     ...
   }: let
     inherit (inputs.nixpkgs) lib;
     devenv-root-path = builtins.readFile devenv-root;
   in
     flake-parts.lib.mkFlake {inherit inputs;} {
+      debug = true;
       imports = [
         inputs.devenv.flakeModule
       ];
@@ -69,7 +72,7 @@
         _module.args.pkgs = import inputs.nixpkgs {
           inherit system;
           config.allowUnfreePredicate = pkg: true;
-          overlays = [(import rust-overlay)];
+          overlays = [(import rust-overlay) nix-vscode-extensions.overlays.default];
         };
         imports = [
           ./nix/packages.nix
@@ -110,10 +113,11 @@
               shfmt
               cargo-zigbuild
               git-cliff
-              inputs.rustowl-flake.packages.${system}.rustowl
+              # inputs.rustowl-flake.packages.${system}.rustowl
               lldb
               deno
               bun
+              vscode-marketplace.dbaeumer.vscode-eslint
             ])
             ++ (with pkgs.pkgsCross; [
               ucrt64.stdenv.cc
@@ -129,7 +133,7 @@
             };
             nix = {
               enable = true;
-              lsp.package = pkgs.nil;
+              lsp.package = pkgs.nixd;
             };
             rust = {
               enable = true;
@@ -162,7 +166,7 @@
             commitizen.enable = true;
             clippy = {
               enable = true;
-              entry = "cargo clippy --all-targets --all-features --workspace";
+              entry = "cargo clippy --all-targets --all-features --workspace -- -D warnings";
               pass_filenames = false;
               language = "system";
             };

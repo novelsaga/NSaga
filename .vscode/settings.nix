@@ -14,14 +14,22 @@ in {
     # "--all-features"
   ];
   "nix.enableLanguageServer" = true;
-  "nix.serverPath" = lib.getExe pkgs.nil;
+  "nix.serverPath" = lib.getExe pkgs.nixd;
   "nix.formatterPath" = "alejandra";
   "nix.serverSettings" = {
-    "nil" = {
+    "nixd" = {
+      "nixpkgs" = {
+        "expr" = ''(builtins.getFlake "git+file://${devenv-root-path}").debug.config.allSystems.${pkgs.system}.allModuleArgs.pkgs'';
+      };
       "formatting" = {
         "command" = [
           (lib.getExe pkgs.alejandra)
         ];
+      };
+      "options" = {
+        "flake-parts" = {
+          "expr" = ''(builtins.getFlake "git+file://${devenv-root-path}").debug.options'';
+        };
       };
     };
   };

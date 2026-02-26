@@ -27,7 +27,7 @@ impl std::str::FromStr for RuntimeChoice {
       "node" | "nodejs" => Ok(RuntimeChoice::Node),
       "bun" => Ok(RuntimeChoice::Bun),
       "deno" => Ok(RuntimeChoice::Deno),
-      _ => Err(format!("Invalid runtime: '{s}'. Valid options: auto, node, bun, deno",)),
+      _ => Err(format!("Invalid runtime: '{s}'. Valid options: auto, node, bun, deno")),
     }
   }
 }
