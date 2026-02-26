@@ -3,7 +3,7 @@ use ts_rs::TS;
 
 /// 格式化配置
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "_config.ts")]
+#[ts(export_to = "_format_config.ts")]
 #[serde(default)]
 pub struct FormatConfig {
   pub indent_spaces: usize,

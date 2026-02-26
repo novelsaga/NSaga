@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "_config.ts")]
+#[ts(export_to = "_workspace_config.ts")]
 #[serde(default)]
 pub struct WorkspaceConfig {
   pub cache_dir: String,

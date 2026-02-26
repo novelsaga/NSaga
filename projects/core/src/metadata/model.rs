@@ -4,7 +4,7 @@ use ts_rs::TS;
 
 /// Represents a metadata entity with id, type, namespace, frontmatter, and body.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export, export_to = "_metadata.ts")]
+#[ts(export_to = "_metadata.ts")]
 pub struct MetadataEntity {
   /// Unique identifier for the metadata entity
   pub id: String,
@@ -149,6 +149,11 @@ mod tests {
 
   #[test]
   fn export_bindings() {
+    // Only run when called from xtask (TS_RS_EXPORT_DIR is set)
+    if std::env::var("TS_RS_EXPORT_DIR").is_err() {
+      println!("Skipping export_bindings - only runs via xtask gen-ts-bindings");
+      return;
+    }
     MetadataEntity::export().expect("failed to export MetadataEntity");
   }
 }
