@@ -22,6 +22,11 @@ projects/core/src/
 ├── library/
 │   ├── mod.rs                  # Library utilities
 │   └── formatter.rs            # Formatter implementation
+├── metadata/
+│   ├── mod.rs                  # Re-exports: MetadataEntity, MetadataQuery, QueryResult
+│   ├── model.rs                # MetadataEntity struct + TS export
+│   ├── parser.rs               # Type inference, namespace generation
+│   └── query.rs                # MetadataQuery trait + InMemoryMetadataStore
 └── state/
     ├── mod.rs                  # State module exports
     ├── _state.rs               # State struct definition
@@ -109,32 +114,128 @@ let needs_js = format.is_js_family();  // true for Js, Mjs, Cjs
 let needs_ts = format.is_ts_family();  // true for Ts, Mts, Cts
 ```
 
+### Metadata Module (`metadata/`)
+
+Provides novel document metadata definition, parsing, and query interfaces.
+
+#### MetadataEntity (`metadata/model.rs`)
+
+Core data type for a metadata document — exported to TypeScript as `_metadata.ts`:
+
+```rust
+pub struct MetadataEntity {
+    pub id: String,           // Unique identifier
+    pub type_: String,        // e.g. "character", "scene", "note"
+    pub namespace: String,    // e.g. "global", "book-01", "book-01/part-01"
+    pub frontmatter: Value,   // serde_json::Value (Record<string, any> in TS)
+    pub body: String,         // Markdown body content
+}
+
+// Construct
+let entity = MetadataEntity::new(id, type_, namespace, frontmatter, body);
+
+// Access frontmatter fields
+entity.get_field("author");           // Option<&Value>
+entity.get_type_from_frontmatter();   // Option<String>
+```
+
+#### Parser Utilities (`metadata/parser.rs`)
+
+```rust
+// Infer entity type from directory structure
+infer_type_from_path(Path::new("metadata/characters/hero.md")) // "character"
+infer_type_from_path(Path::new("metadata/scenes/open.md"))     // "scene"
+infer_type_from_path(Path::new("metadata/notes/ch1.md"))       // "note"
+
+// Resolve type: frontmatter takes priority over path inference
+resolve_type(path, &frontmatter)  // uses frontmatter["type"] if present
+
+// Generate namespace from file location relative to workspace root
+generate_namespace(
+    Path::new("/project/book-01/metadata/hero.md"),
+    Path::new("/project"),
+) // "book-01"
+// Root-level metadata/ → "global"
+// book-01/part-01/metadata/ → "book-01/part-01"
+```
+
+**Namespace rules**:
+
+| Path | Namespace |
+| ---- | --------- |
+| `metadata/*.md` | `"global"` |
+| `book-01/metadata/*.md` | `"book-01"` |
+| `book-01/part-01/metadata/*.md` | `"book-01/part-01"` |
+
+#### MetadataQuery Trait + InMemoryMetadataStore (`metadata/query.rs`)
+
+```rust
+// Trait defining the query interface
+pub trait MetadataQuery {
+    fn get_by_id(&self, id: &str) -> Option<MetadataEntity>;
+    fn get_by_name(&self, name: &str, namespace: &str) -> Option<MetadataEntity>;
+    fn list_by_type(&self, type_: &str, namespace: Option<&str>) -> Vec<MetadataEntity>;
+    fn list_by_namespace(&self, namespace: &str) -> Vec<MetadataEntity>;
+    fn search(&self, query: &str, type_filter: Option<&str>) -> Vec<MetadataEntity>;
+}
+
+// In-memory implementation (HashMap-backed, dual-indexed)
+let mut store = InMemoryMetadataStore::new();
+store.insert(entity);
+store.get_by_id("hero-1");
+store.list_by_type("character", Some("book-01"));
+store.search("protagonist", None);
+```
 ## Type Exports to TypeScript
 
-Core types are exported to TypeScript via `ts-rs`:
+Core types are exported to TypeScript via `ts-rs`.
 
-1. Add derive macro:
+### Adding a New Type
+
+1. Add derive macro (**no `export` keyword**, only `export_to` with filename):
 
    ```rust
    #[derive(TS)]
-   #[ts(export, export_to = "_config.ts")]
-   pub struct MyConfig { ... }
+   #[ts(export_to = "_mytype.ts")]
+   pub struct MyType { ... }
    ```
 
-2. Run test to generate:
+2. Register `.export()` in `config/mod.rs` test:
+
+   ```rust
+   // In config::tests::export_bindings
+   MyType::export().expect("failed to export MyType");
+   ```
+
+3. Generate via xtask only:
 
    ```bash
-   cargo test export_bindings
+   cargo run -p xtask -- gen-ts-bindings
    ```
 
-3. Types appear in `projects/cli-js-bridges/config-bridge/src/types/_config.ts`
+4. Types appear as separate `_*.ts` files in `projects/cli-js-bridges/config-bridge/src/types/`:
+   - `_format_config.ts` - FormatConfig
+   - `_workspace_config.ts` - WorkspaceConfig
+   - `_root_config.ts` - RootConfig
+   - `_overridable_config.ts` - OverridableConfig
+   - `_novelsaga_config.ts` - NovelSagaConfig (internal, prefixed `_NovelSagaConfig`)
+   - `_metadata.ts` - MetadataEntity
 
-4. Extend (don't modify!) in separate file:
+5. Consume via `config.ts` (do not modify `_*.ts` directly):
    ```typescript
    // config.ts
-   import type { RootConfig, OverridableConfig } from './_config.ts'
-   export type NovelSagaConfig = RootConfig & OverridableConfig
+   import type { OverridableConfig } from './_overridable_config'
+   import type { RootConfig } from './_root_config'
+   export type NovelSagaConfig = OverridableConfig & RootConfig
    ```
+
+6. Generated `_*.ts` files are gitignored — regenerate after Rust type changes.
+
+### IMPORTANT: `export` vs `export_to`
+
+- `#[ts(export, export_to = "...")]` — **FORBIDDEN**: auto-generates a test that writes files on every `cargo test`
+- `#[ts(export_to = "_name.ts")]` — **CORRECT**: only exports when `.export()` is called explicitly
+- All ts-rs file writes are controlled exclusively by `xtask gen-ts-bindings`
 
 ## Config File Discovery
 

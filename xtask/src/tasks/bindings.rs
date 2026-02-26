@@ -16,28 +16,35 @@ pub fn generate_ts() -> Result<()> {
   // Set export directory
   std::env::set_var(
     "TS_RS_EXPORT_DIR",
-    "../../projects/cli-js-bridges/config-bridge/src/types",
+    project
+      .join("projects/cli-js-bridges/config-bridge/src/types")
+      .to_str()
+      .unwrap(),
   );
 
-  // Run test to trigger export
+  // Run all export tests to trigger binding generation
   run_command(
     Command::new("cargo")
-      .args([
-        "test",
-        "-p",
-        "novelsaga-core",
-        "--lib",
-        "config::tests::export_bindings",
-      ])
+      .args(["test", "-p", "novelsaga-core", "--lib", "export_bindings"])
       .current_dir(&project),
   )?;
 
-  let target_file = export_dir.join("_config.ts");
-  if target_file.exists() {
-    let content = std::fs::read_to_string(&target_file)?;
-    let with_headers = format!("/* eslint-disable */\n{}", content);
-    std::fs::write(&target_file, with_headers)?;
-    println!("✅ Generated {} with headers", target_file.display());
+  // Add eslint-disable header to all generated files
+  for entry in std::fs::read_dir(&export_dir)? {
+    let entry = entry?;
+    let path = entry.path();
+    if path.extension().map_or(false, |ext| ext == "ts")
+      && path
+        .file_name()
+        .map_or(false, |name| name.to_str().map_or(false, |s| s.starts_with('_')))
+    {
+      let content = std::fs::read_to_string(&path)?;
+      if !content.starts_with("/* eslint-disable */") {
+        let with_headers = format!("/* eslint-disable */\n{}", content);
+        std::fs::write(&path, with_headers)?;
+        println!("✅ Generated {} with headers", path.display());
+      }
+    }
   }
 
   Ok(())

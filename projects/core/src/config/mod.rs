@@ -11,7 +11,7 @@ use ts_rs::TS;
 pub trait Config {}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "_config.ts")]
+#[ts(export_to = "_overridable_config.ts")]
 #[serde(default)]
 pub struct OverridableConfig {
   pub fmt: formatter::FormatConfig,
@@ -20,7 +20,7 @@ pub struct OverridableConfig {
 impl Config for OverridableConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
-#[ts(export, export_to = "_config.ts")]
+#[ts(export_to = "_root_config.ts")]
 #[serde(default)]
 pub struct RootConfig {
   pub workspace: Option<workspace::WorkspaceConfig>,
@@ -39,7 +39,7 @@ impl RootConfig {
 impl Config for RootConfig {}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "_config.ts", rename = "_NovelSagaConfig")]
+#[ts(export_to = "_novelsaga_config.ts", rename = "_NovelSagaConfig")]
 #[serde(default)]
 pub struct NovelSagaConfig {
   #[serde(flatten)]
@@ -80,6 +80,12 @@ mod tests {
 
   #[test]
   fn export_bindings() {
+    // Only run when called from xtask (TS_RS_EXPORT_DIR is set)
+    if std::env::var("TS_RS_EXPORT_DIR").is_err() {
+      println!("Skipping export_bindings - only runs via xtask gen-ts-bindings");
+      return;
+    }
+
     formatter::FormatConfig::export().expect("failed to export FormatConfig");
     workspace::WorkspaceConfig::export().expect("failed to export WorkspaceConfig");
     RootConfig::export().expect("failed to export RootConfig");

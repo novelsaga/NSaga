@@ -10,6 +10,9 @@ The CLI module (`novelsaga-cli`) provides the LSP server and JS Bridge system fo
 projects/cli/src/
 ├── main.rs                 # Entry point, CLI argument handling
 ├── args/mod.rs             # CLI argument definitions (clap)
+├── commands/
+│   ├── mod.rs              # Commands module exports
+│   └── metadata.rs         # MetadataCommands + handle_metadata_command
 ├── config/
 │   ├── mod.rs              # Config module exports
 │   └── loader.rs           # ConfigLoader - creates js/ts loaders for Core
@@ -108,6 +111,9 @@ Commands:
   init     Initialize a new NovelSaga project
   format   Format NovelSaga configuration files
   check    Check configuration files for errors
+  index    Index a directory for metadata
+  list     List all indexed directories
+  show     Show metadata for a specific file
 
 Global Options (work with all commands):
   --runtime <TYPE>     Runtime: auto, node, bun, deno (default: auto)
@@ -135,6 +141,17 @@ novelsaga format --check
 
 # Check config for errors (placeholder)
 novelsaga check
+
+# Metadata: index current directory
+novelsaga index
+novelsaga index /path/to/dir
+
+# Metadata: list indexed directories
+novelsaga list
+novelsaga list --detailed
+
+# Metadata: show metadata for a file
+novelsaga show /path/to/file.md
 ```
 
 ### No Subcommand Behavior
@@ -217,6 +234,8 @@ pub enum Commands {
     Init { path: PathBuf },              // Project initialization
     Format { files: Vec<PathBuf>, check: bool },  // Config formatting
     Check { files: Vec<PathBuf> },       // Config validation
+    #[command(flatten)]
+    Metadata(MetadataCommands),          // Metadata subcommands (flattened)
 }
 
 // Main CLI struct
@@ -229,6 +248,9 @@ pub struct Cli {
     pub command: Option<Commands>,       // None = show status info
 }
 ```
+
+Note: `MetadataCommands` is **flattened** into `Commands` via `#[command(flatten)]`,
+so `index`, `list`, and `show` appear as top-level subcommands of `novelsaga`.
 
 ### Testing CLI Arguments
 
@@ -247,3 +269,29 @@ fn test_parse_global_runtime_with_subcommand() {
     assert_eq!(cli.get_runtime_choice(), RuntimeChoice::Node);
 }
 ```
+
+## Commands Module (`commands/`)
+
+Houses command handler logic, separate from argument definitions in `args/`.
+
+### MetadataCommands (`commands/metadata.rs`)
+
+Defines metadata subcommands and their async handlers:
+
+```rust
+pub enum MetadataCommands {
+    Index(IndexCommand),  // novelsaga index [PATH]
+    List(ListCommand),    // novelsaga list [--detailed]
+    Show(ShowCommand),    // novelsaga show <PATH>
+}
+
+pub async fn handle_metadata_command(command: MetadataCommands) -> anyhow::Result<()>
+```
+
+| Subcommand | Args | Description |
+| ---------- | ---- | ----------- |
+| `index`    | `[PATH]` (default: `.`) | Index a directory for metadata |
+| `list`     | `[--detailed]` | List all indexed directories |
+| `show`     | `<PATH>` | Show metadata for a specific file |
+
+> **Status**: Handlers are currently `todo!()` stubs — implementation pending.
