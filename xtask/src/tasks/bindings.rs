@@ -33,10 +33,10 @@ pub fn generate_ts() -> Result<()> {
   for entry in std::fs::read_dir(&export_dir)? {
     let entry = entry?;
     let path = entry.path();
-    if path.extension().map_or(false, |ext| ext == "ts")
+    if path.extension().is_some_and(|ext| ext == "ts")
       && path
         .file_name()
-        .map_or(false, |name| name.to_str().map_or(false, |s| s.starts_with('_')))
+        .is_some_and(|name| name.to_str().is_some_and(|s| s.starts_with('_')))
     {
       let content = std::fs::read_to_string(&path)?;
       if !content.starts_with("/* eslint-disable */") {
