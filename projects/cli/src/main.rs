@@ -13,8 +13,10 @@ use crate::{
 mod args;
 mod assets;
 mod bridge;
+mod commands;
 mod config;
 mod lsp;
+mod metadata;
 mod plugins;
 
 #[tokio::main(flavor = "current_thread")]
@@ -50,6 +52,11 @@ async fn main() {
     }
     Some(Commands::Check { files }) => {
       todo!("Check command not implemented yet. Files: {:?}", files);
+    }
+    Some(Commands::Metadata(cmd)) => {
+      commands::metadata::handle_metadata_command(cmd.clone())
+        .await
+        .expect("Metadata command failed");
     }
     None => {
       print_status_info(&cli);

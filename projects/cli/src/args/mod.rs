@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use path_absolutize::Absolutize;
 
+use crate::commands::metadata::MetadataCommands;
+
 /// JavaScript 运行时选择
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeChoice {
@@ -60,6 +62,10 @@ pub enum Commands {
     #[arg()]
     files: Vec<PathBuf>,
   },
+
+  /// Manage document metadata
+  #[command(flatten)]
+  Metadata(MetadataCommands),
 }
 
 #[derive(Parser)]
