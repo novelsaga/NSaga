@@ -37,6 +37,7 @@ pub trait Transport: Send {
 }
 
 pub mod stdio;
+pub mod unix_socket;
 
 #[cfg(test)]
 mod tests;
