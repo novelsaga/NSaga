@@ -7,8 +7,9 @@ use tower_lsp::{
   jsonrpc::Result,
   lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-    InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf, Position, Range, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
+    ExecuteCommandParams, InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf, Position, Range,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
+    WorkDoneProgressOptions,
   },
 };
 
@@ -41,6 +42,14 @@ impl LanguageServer for Backend {
       capabilities: ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         document_formatting_provider: Some(OneOf::Left(true)),
+        execute_command_provider: Some(tower_lsp::lsp_types::ExecuteCommandOptions {
+          commands: vec![
+            "novelsaga/index".to_string(),
+            "novelsaga/list".to_string(),
+            "novelsaga/show".to_string(),
+          ],
+          work_done_progress_options: WorkDoneProgressOptions::default(),
+        }),
         ..Default::default()
       },
       server_info: Some(ServerInfo {
@@ -139,7 +148,6 @@ impl LanguageServer for Backend {
     };
 
     // 使用 pangu 格式化文本(在中英文之间添加空格)
-    // let formatted = formatter(&config.as_ref().unwrap_or(&OverridableConfig::default()).fmt, content);
     let formatted = library::formatter::format_text(
       &Article::new(content),
       &config.as_ref().unwrap_or(&OverridableConfig::default()).fmt,
@@ -161,5 +169,53 @@ impl LanguageServer for Backend {
       },
       new_text: formatted.content_ref().to_string(),
     }]))
+  }
+
+  async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
+    eprintln!("Execute command: {}", params.command);
+
+    match params.command.as_str() {
+      "novelsaga/index" => {
+        self
+          .client
+          .log_message(MessageType::INFO, "Executing novelsaga/index command")
+          .await;
+        Ok(Some(serde_json::json!({
+          "status": "ok",
+          "command": "novelsaga/index",
+          "message": "Index command received (implementation pending)"
+        })))
+      }
+      "novelsaga/list" => {
+        self
+          .client
+          .log_message(MessageType::INFO, "Executing novelsaga/list command")
+          .await;
+        Ok(Some(serde_json::json!({
+          "status": "ok",
+          "command": "novelsaga/list",
+          "message": "List command received (implementation pending)"
+        })))
+      }
+      "novelsaga/show" => {
+        self
+          .client
+          .log_message(MessageType::INFO, "Executing novelsaga/show command")
+          .await;
+        Ok(Some(serde_json::json!({
+          "status": "ok",
+          "command": "novelsaga/show",
+          "arguments_received": params.arguments.len(),
+          "message": "Show command received (implementation pending)"
+        })))
+      }
+      _ => {
+        self
+          .client
+          .log_message(MessageType::WARNING, format!("Unknown command: {}", params.command))
+          .await;
+        Ok(None)
+      }
+    }
   }
 }
