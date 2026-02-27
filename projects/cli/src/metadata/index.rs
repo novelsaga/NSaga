@@ -48,7 +48,13 @@ impl IndexManager {
   /// * `Ok(())` on success
   /// * `Err(sled::Error)` if database operation fails
   pub fn index_entity(&self, entity: &MetadataEntity) -> Result<(), sled::Error> {
+    // Clean up old indexes if entity already exists (prevents ghost indexes)
+    if self.get_by_id(&entity.id)?.is_some() {
+      self.remove_entity(&entity.id)?;
+    }
+
     // Serialize entity
+
     let entity_bytes = serde_json::to_vec(entity)
       .map_err(|e| sled::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())))?;
 
@@ -355,6 +361,36 @@ mod tests {
     // After flush, data should be persistent
     let retrieved = manager.get_by_id("id-1")?;
     assert!(retrieved.is_some());
+
+    Ok(())
+  }
+
+  #[test]
+  fn test_ghost_index_cleanup_on_update() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let manager = IndexManager::open(temp_dir.path())?;
+
+    // Create and index entity with namespace "blog"
+    let entity1 = MetadataEntity::new("id-1", "article", "blog", json!({}), "body1");
+    manager.index_entity(&entity1)?;
+
+    // Verify it's in "blog" namespace
+    let blog_entities = manager.list_by_namespace("blog")?;
+    assert_eq!(blog_entities.len(), 1);
+    assert_eq!(blog_entities[0].id, "id-1");
+
+    // Update same entity with different namespace
+    let entity2 = MetadataEntity::new("id-1", "article", "docs", json!({}), "body1");
+    manager.index_entity(&entity2)?;
+
+    // Verify entity moved to "docs" namespace
+    let docs_entities = manager.list_by_namespace("docs")?;
+    assert_eq!(docs_entities.len(), 1);
+    assert_eq!(docs_entities[0].namespace, "docs");
+
+    // Verify ghost index is cleaned: "blog" should now be empty
+    let blog_entities_after = manager.list_by_namespace("blog")?;
+    assert_eq!(blog_entities_after.len(), 0, "Ghost index not cleaned: entity still found in old namespace");
 
     Ok(())
   }
