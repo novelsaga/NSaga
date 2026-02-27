@@ -201,6 +201,16 @@ impl IndexManager {
     Ok(())
   }
 
+  /// Lists all entities by scanning the entity: prefix.
+  ///
+  /// # Returns
+  /// * `Ok(Vec<MetadataEntity>)` - Vector of all entities
+  /// * `Err(sled::Error)` if database operation fails
+  pub fn list_all(&self) -> Result<Vec<MetadataEntity>, sled::Error> {
+    let prefix = "entity:";
+    self.collect_entities_by_prefix(prefix)
+  }
+
   /// Helper function to collect entities from a prefix scan.
   fn collect_entities_by_prefix(&self, prefix: &str) -> Result<Vec<MetadataEntity>, sled::Error> {
     let mut entities = Vec::new();
@@ -390,7 +400,11 @@ mod tests {
 
     // Verify ghost index is cleaned: "blog" should now be empty
     let blog_entities_after = manager.list_by_namespace("blog")?;
-    assert_eq!(blog_entities_after.len(), 0, "Ghost index not cleaned: entity still found in old namespace");
+    assert_eq!(
+      blog_entities_after.len(),
+      0,
+      "Ghost index not cleaned: entity still found in old namespace"
+    );
 
     Ok(())
   }

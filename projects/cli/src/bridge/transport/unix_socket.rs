@@ -115,48 +115,50 @@ impl Transport for UnixSocketTransport {
     }
 
     let mut line = String::new();
-    match self.reader.read_line(&mut line) {
-      Ok(0) => {
-        // EOF - 远程端已关闭连接
-        self.closed = true;
-        Err(BridgeError::TransportClosed)
-      }
-      Ok(_) => {
-        let trimmed = line.trim();
-
-        // 跳过空行
-        if trimmed.is_empty() {
-          // 递归调用以获取下一行
-          return self.receive();
+    loop {
+      line.clear();
+      match self.reader.read_line(&mut line) {
+        Ok(0) => {
+          // EOF - 远程端已关闭连接
+          self.closed = true;
+          return Err(BridgeError::TransportClosed);
         }
+        Ok(_) => {
+          let trimmed = line.trim();
 
-        // 跳过非 JSON 行
-        if !trimmed.starts_with('{') {
-          eprintln!("[UnixSocketTransport] Skipping non-JSON line: {trimmed}");
-          // 递归调用以获取下一行
-          return self.receive();
-        }
+          // 跳过空行
+          if trimmed.is_empty() {
+            // 继续读取下一行
+            continue;
+          }
 
-        // 解析 JSON-RPC 响应
-        match RpcResponse::from_json_str(trimmed) {
-          Ok(response) => Ok(response),
-          Err(e) => {
-            eprintln!("[UnixSocketTransport] Failed to parse JSON-RPC response: {e}");
-            eprintln!("[UnixSocketTransport] Raw line: {trimmed}");
-            Err(BridgeError::JsonParseError(e))
+          // 跳过非 JSON 行
+          if !trimmed.starts_with('{') {
+            eprintln!("[UnixSocketTransport] Skipping non-JSON line: {trimmed}");
+            // 继续读取下一行
+            continue;
+          }
+
+          // 解析 JSON-RPC 响应
+          match RpcResponse::from_json_str(trimmed) {
+            Ok(response) => return Ok(response),
+            Err(e) => {
+              eprintln!("[UnixSocketTransport] Failed to parse JSON-RPC response: {e}");
+              eprintln!("[UnixSocketTransport] Raw line: {trimmed}");
+              return Err(BridgeError::JsonParseError(e));
+            }
           }
         }
-      }
-      Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-        self.closed = true;
-        Err(BridgeError::Timeout(self.timeout))
-      }
-      Err(e) => {
-        self.closed = true;
-        Err(BridgeError::IoError {
-          context: "Failed to read JSON-RPC response from Unix socket".to_string(),
-          source: e,
-        })
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+          // WouldBlock 表示暂时无数据，继续等待
+        }
+        Err(e) => {
+          self.closed = true;
+          return Err(BridgeError::IoError {
+            context: "Failed to read JSON-RPC response from Unix socket".to_string(),
+            source: e,
+          });
+        }
       }
     }
   }
