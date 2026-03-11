@@ -158,9 +158,9 @@ Critical Path: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 →
   - 不要修改现有 metadata/article 模块的导出
 
   **Acceptance Criteria**:
-  - [ ] `MarkdownParts` 可正确分离 frontmatter 和 body
-  - [ ] `classify_path()` 正确识别 metadata/article 路径
-  - [ ] `cargo test -p novelsaga-core` 新增测试通过
+  - [x] `MarkdownParts` 可正确分离 frontmatter 和 body
+  - [x] `classify_path()` 正确识别 metadata/article 路径
+  - [x] `cargo test -p novelsaga-core` 新增测试通过
 
 ---
 
@@ -189,10 +189,10 @@ Critical Path: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 →
   - 不要引入 async 代码
 
   **Acceptance Criteria**:
-  - [ ] `ArticleDocument` 可正确从 `MarkdownParts` 构造
-  - [ ] `title`, `chapter_number`, `order` 正确从 frontmatter 提取
-  - [ ] `word_count` 正确计算（body.split_whitespace().count()）
-  - [ ] 旧 `Article` 代码仍能编译
+  - [x] `ArticleDocument` 可正确从 `MarkdownParts` 构造
+  - [x] `title`, `chapter_number`, `order` 正确从 frontmatter 提取
+  - [x] `word_count` 正确计算（body.split_whitespace().count()）
+  - [x] 旧 `Article` 代码仍能编译
 
 ---
 
@@ -222,10 +222,10 @@ Critical Path: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 →
   - 不要修改现有测试
 
   **Acceptance Criteria**:
-  - [ ] `from_parts()` 可正确构造 MetadataEntity
-  - [ ] `new()` 内部调用 `from_parts()`
-  - [ ] `TryFrom` 实现正确处理路径和 frontmatter
-  - [ ] 所有现有测试仍通过
+  - [x] `from_parts()` 可正确构造 MetadataEntity
+  - [x] `new()` 内部调用 `from_parts()`
+  - [x] `TryFrom` 实现正确处理路径和 frontmatter
+  - [x] 所有现有测试仍通过
 
 ---
 
@@ -242,9 +242,9 @@ Critical Path: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 →
   - 不要修改 watcher.rs 内部代码
 
   **Acceptance Criteria**:
-  - [ ] `watcher` 模块不再被导出
-  - [ ] `cargo check -p novelsaga-cli` 无警告
-  - [ ] 其他代码不依赖 FileWatcher
+  - [x] `watcher` 模块不再被导出
+  - [x] `cargo check -p novelsaga-cli` 无警告
+  - [x] 其他代码不依赖 FileWatcher
 
 ---
 
@@ -269,9 +269,9 @@ Critical Path: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 →
   - 不要添加 async 代码
 
   **Acceptance Criteria**:
-  - [ ] `WorkspaceDocument` 正确定义和实现
-  - [ ] match 分支能正确处理两种类型
-  - [ ] 单元测试覆盖两种变体
+  - [x] `WorkspaceDocument` 正确定义和实现
+  - [x] match 分支能正确处理两种类型
+  - [x] 单元测试覆盖两种变体
 
 ---
 
@@ -309,11 +309,11 @@ Critical Path: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 →
   - 不要破坏现有功能（formatting 等）
 
   **Acceptance Criteria**:
-  - [ ] `workspace_root` 正确保存（含 fallback）
-  - [ ] URI → Path 转换逻辑正确
-  - [ ] **并发约束实现**：锁外解析，锁内回写
-  - [ ] `did_open`/`did_change` 同步解析
-  - [ ] 解析错误时保留在 store
+  - [x] `workspace_root` 正确保存（含 fallback）
+  - [x] URI → Path 转换逻辑正确
+  - [x] **并发约束实现**：锁外解析，锁内回写
+  - [x] `did_open`/`did_change` 同步解析
+  - [x] 解析错误时保留在 store
 
 ---
 
@@ -344,11 +344,11 @@ Critical Path: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 →
   - **打开文档不要被 watched-files 覆盖**
 
   **Acceptance Criteria**:
-  - [ ] LSP 动态注册 watched files capability
-  - [ ] IndexManager 添加 `canonical_path -> id` 反向索引
-  - [ ] **反向索引维护**：`remove/rebuild` 同步清理/重建
-  - [ ] Create/Change/Delete/Rename 正确处理
-  - [ ] 打开文档只标记 `disk_changed`
+  - [x] LSP 动态注册 watched files capability
+  - [x] IndexManager 添加 `canonical_path -> id` 反向索引
+  - [x] **反向索引维护**：`remove/rebuild` 同步清理/重建
+  - [x] Create/Change/Delete/Rename 正确处理
+  - [x] 打开文档只标记 `disk_changed`
 
 ---
 
@@ -364,9 +364,9 @@ Critical Path: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 →
   - 不要重复测试现有代码
 
   **Acceptance Criteria**:
-  - [ ] 新增代码行覆盖率 >80%
-  - [ ] 所有边界情况有测试
-  - [ ] `cargo test -p novelsaga-core` 通过
+  - [x] 新增代码行覆盖率 >80%
+  - [x] 所有边界情况有测试
+  - [x] `cargo test -p novelsaga-core` 通过
 
 ---
 
@@ -384,10 +384,10 @@ Critical Path: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6 →
   - 不要依赖外部工具
 
   **Acceptance Criteria**:
-  - [ ] `projects/cli/Cargo.toml` 添加 `async-lsp-client` dev-dependency
-  - [ ] 集成测试可独立运行
-  - [ ] 覆盖所有 LSP 文档生命周期
-  - [ ] 测试后无残留进程/文件
+  - [x] `projects/cli/Cargo.toml` 添加 `async-lsp-client` dev-dependency
+  - [x] 集成测试可独立运行
+  - [x] 覆盖所有 LSP 文档生命周期
+  - [x] 测试后无残留进程/文件
 
 ---
 
