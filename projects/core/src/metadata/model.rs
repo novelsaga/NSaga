@@ -1,6 +1,28 @@
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
+
+use crate::{
+  document::MarkdownParts,
+  metadata::parser::{generate_namespace, resolve_type},
+};
+
+/// Represents the parts needed to construct a `MetadataEntity`.
+#[derive(Debug, Clone)]
+pub struct MetadataEntityParts {
+  /// Unique identifier for the metadata entity
+  pub id: String,
+  /// Type of the metadata entity
+  pub type_: String,
+  /// Namespace grouping for the entity
+  pub namespace: String,
+  /// Frontmatter data stored as JSON value
+  pub frontmatter: Value,
+  /// Body content as string
+  pub body: String,
+}
 
 /// Represents a metadata entity with id, type, namespace, frontmatter, and body.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -38,12 +60,31 @@ impl MetadataEntity {
     frontmatter: Value,
     body: impl Into<String>,
   ) -> Self {
-    Self {
+    let parts = MetadataEntityParts {
       id: id.into(),
       type_: type_.into(),
       namespace: namespace.into(),
       frontmatter,
       body: body.into(),
+    };
+    Self::from_parts(parts)
+  }
+
+  /// Creates a new `MetadataEntity` from `MetadataEntityParts`.
+  ///
+  /// # Arguments
+  /// * `parts` - The parts needed to construct an entity
+  ///
+  /// # Returns
+  /// New `MetadataEntity` instance
+  #[must_use]
+  pub fn from_parts(parts: MetadataEntityParts) -> Self {
+    Self {
+      id: parts.id,
+      type_: parts.type_,
+      namespace: parts.namespace,
+      frontmatter: parts.frontmatter,
+      body: parts.body,
     }
   }
 
@@ -72,6 +113,57 @@ impl MetadataEntity {
       .get("type")
       .and_then(|v| v.as_str())
       .map(ToString::to_string)
+  }
+}
+
+impl TryFrom<(MarkdownParts, &Path, &Path)> for MetadataEntity {
+  type Error = String;
+
+  /// Create `MetadataEntity` from markdown parts, file path, and workspace root.
+  ///
+  /// # Arguments
+  /// * `markdown_parts` - Parsed markdown with frontmatter and body
+  /// * `file_path` - Full path to the metadata file
+  /// * `workspace_root` - Path to the workspace root
+  ///
+  /// # Returns
+  /// * `Ok(MetadataEntity)` on success
+  /// * `Err(String)` if id generation fails
+  ///
+  /// # Examples
+  /// ```ignore
+  /// let parts = MarkdownParts::parse(content);
+  /// let entity = MetadataEntity::try_from((
+  ///   parts,
+  ///   Path::new("/project/metadata/characters/hero.md"),
+  ///   Path::new("/project"),
+  /// ))?;
+  /// ```
+  fn try_from(value: (MarkdownParts, &Path, &Path)) -> Result<Self, Self::Error> {
+    let (markdown_parts, file_path, workspace_root) = value;
+
+    // Generate ID from filename (without extension)
+    let id = file_path
+      .file_stem()
+      .and_then(|stem| stem.to_str())
+      .map(ToString::to_string)
+      .ok_or_else(|| "Failed to extract filename for ID".to_string())?;
+
+    // Resolve type: frontmatter takes priority
+    let type_ = resolve_type(file_path, &markdown_parts.frontmatter);
+
+    // Generate namespace from file location
+    let namespace = generate_namespace(file_path, workspace_root);
+
+    let parts = MetadataEntityParts {
+      id,
+      type_,
+      namespace,
+      frontmatter: markdown_parts.frontmatter,
+      body: markdown_parts.body,
+    };
+
+    Ok(Self::from_parts(parts))
   }
 }
 
@@ -145,6 +237,103 @@ mod tests {
     let deserialized: MetadataEntity = serde_json::from_str(&serialized).expect("deserialization failed");
 
     assert_eq!(entity, deserialized);
+  }
+  #[test]
+  fn test_from_parts_creates_entity() {
+    let frontmatter = json!({ "author": "John" });
+    let parts = MetadataEntityParts {
+      id: "entity-1".to_string(),
+      type_: "character".to_string(),
+      namespace: "book-01".to_string(),
+      frontmatter,
+      body: "A brave hero".to_string(),
+    };
+
+    let entity = MetadataEntity::from_parts(parts);
+
+    assert_eq!(entity.id, "entity-1");
+    assert_eq!(entity.type_, "character");
+    assert_eq!(entity.namespace, "book-01");
+    assert_eq!(entity.body, "A brave hero");
+    assert_eq!(entity.get_field("author"), Some(&json!("John")));
+  }
+
+  #[test]
+  fn test_from_parts_and_new_equivalent() {
+    let frontmatter = json!({ "title": "Test" });
+
+    let parts = MetadataEntityParts {
+      id: "id1".to_string(),
+      type_: "article".to_string(),
+      namespace: "global".to_string(),
+      frontmatter: frontmatter.clone(),
+      body: "content".to_string(),
+    };
+    let entity1 = MetadataEntity::from_parts(parts);
+
+    let entity2 = MetadataEntity::new("id1", "article", "global", frontmatter, "content");
+
+    assert_eq!(entity1, entity2);
+  }
+
+  #[test]
+  fn test_try_from_markdown_parts_success() {
+    let markdown_content = "---\ntitle: Hero\ntype: character\n---\n# Character Details\nBrave and noble.";
+    let parts = crate::document::MarkdownParts::parse(markdown_content);
+
+    let file_path = Path::new("/project/book-01/metadata/characters/hero.md");
+    let workspace_root = Path::new("/project");
+
+    let result = MetadataEntity::try_from((parts, file_path, workspace_root));
+    assert!(result.is_ok());
+
+    let entity = result.unwrap();
+    assert_eq!(entity.id, "hero");
+    assert_eq!(entity.type_, "character"); // From frontmatter
+    assert_eq!(entity.namespace, "book-01");
+    assert_eq!(entity.body, "# Character Details\nBrave and noble.");
+    assert_eq!(entity.get_field("title"), Some(&json!("Hero")));
+  }
+
+  #[test]
+  fn test_try_from_markdown_parts_infers_type_from_path() {
+    let markdown_content = "---\ntitle: Scene\n---\n## Opening scene";
+    let parts = crate::document::MarkdownParts::parse(markdown_content);
+
+    let file_path = Path::new("/project/book-01/part-01/metadata/scenes/opening.md");
+    let workspace_root = Path::new("/project");
+
+    let entity = MetadataEntity::try_from((parts, file_path, workspace_root)).unwrap();
+    assert_eq!(entity.id, "opening");
+    assert_eq!(entity.type_, "scene"); // Inferred from path
+    assert_eq!(entity.namespace, "book-01/part-01");
+  }
+
+  #[test]
+  fn test_try_from_metadata_at_root() {
+    let markdown_content = "---\nstatus: published\n---\nGlobal metadata";
+    let parts = crate::document::MarkdownParts::parse(markdown_content);
+
+    let file_path = Path::new("/project/metadata/settings.md");
+    let workspace_root = Path::new("/project");
+
+    let entity = MetadataEntity::try_from((parts, file_path, workspace_root)).unwrap();
+    assert_eq!(entity.id, "settings");
+    assert_eq!(entity.namespace, "global");
+    assert_eq!(entity.body, "Global metadata");
+  }
+
+  #[test]
+  fn test_try_from_frontmatter_type_priority() {
+    // Even though path suggests "scene", frontmatter type should take priority
+    let markdown_content = "---\ntype: event\n---\nSpecial event";
+    let parts = crate::document::MarkdownParts::parse(markdown_content);
+
+    let file_path = Path::new("/project/metadata/scenes/episode.md");
+    let workspace_root = Path::new("/project");
+
+    let entity = MetadataEntity::try_from((parts, file_path, workspace_root)).unwrap();
+    assert_eq!(entity.type_, "event"); // Frontmatter priority
   }
 
   #[test]

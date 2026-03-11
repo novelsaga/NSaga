@@ -1,4 +1,8 @@
-use std::path::Path;
+use std::{
+  collections::HashMap,
+  path::{Path, PathBuf},
+  sync::{RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
 
 use blake3;
 use novelsaga_core::metadata::model::MetadataEntity;
@@ -7,9 +11,11 @@ use sled::Db;
 
 /// `IndexManager` provides persistent key-value storage for metadata entities
 /// with secondary indexes for name, type, and namespace lookups.
+#[derive(Debug)]
 #[allow(dead_code)]
 pub struct IndexManager {
   db: Db,
+  path_to_id: RwLock<HashMap<PathBuf, String>>,
 }
 
 #[allow(dead_code)]
@@ -24,7 +30,12 @@ impl IndexManager {
   /// * `Err(sled::Error)` if database cannot be opened
   pub fn open(path: &Path) -> Result<Self, sled::Error> {
     let db = sled::open(path)?;
-    Ok(IndexManager { db })
+    let manager = IndexManager {
+      db,
+      path_to_id: RwLock::new(HashMap::new()),
+    };
+    manager.rebuild_path_to_id_index()?;
+    Ok(manager)
   }
 
   /// Generates a unique 16-character ID from a source string using blake3 hash.
@@ -74,7 +85,17 @@ impl IndexManager {
     let ns_key = format!("ns:{}:{}", entity.namespace, entity.id);
     self.db.insert(ns_key.as_bytes(), entity.id.as_bytes())?;
 
+    if let Some(path) = Self::entity_index_path(entity) {
+      self.path_index_write().insert(path, entity.id.clone());
+    }
+
     Ok(())
+  }
+
+  #[must_use]
+  pub fn get_id_by_path(&self, path: &Path) -> Option<String> {
+    let normalized_path = Self::normalize_path(path);
+    self.path_index_read().get(&normalized_path).cloned()
   }
 
   /// Retrieves an entity by its ID.
@@ -135,6 +156,10 @@ impl IndexManager {
   pub fn remove_entity(&self, id: &str) -> Result<(), sled::Error> {
     // Get entity first to find namespace and type for index cleanup
     if let Some(entity) = self.get_by_id(id)? {
+      if let Some(path) = Self::entity_index_path(&entity) {
+        self.path_index_write().remove(&path);
+      }
+
       // Remove entity: entity:{id}
       let entity_key = format!("entity:{id}");
       self.db.remove(entity_key.as_bytes())?;
@@ -183,6 +208,8 @@ impl IndexManager {
       }
     }
 
+    self.path_index_write().clear();
+
     // Re-index all entities
     for entity in entities {
       self.index_entity(&entity)?;
@@ -226,6 +253,52 @@ impl IndexManager {
     }
 
     Ok(entities)
+  }
+
+  fn entity_index_path(entity: &MetadataEntity) -> Option<PathBuf> {
+    ["canonical_path", "path", "file_path", "source_path"]
+      .into_iter()
+      .find_map(|key| {
+        entity
+          .get_field(key)
+          .and_then(|value| value.as_str())
+          .map(PathBuf::from)
+      })
+      .map(|path| Self::normalize_path(&path))
+  }
+
+  fn normalize_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+  }
+
+  fn rebuild_path_to_id_index(&self) -> Result<(), sled::Error> {
+    let mut path_to_id = HashMap::new();
+
+    for item in self.db.scan_prefix(b"entity:") {
+      let (_key, bytes) = item?;
+      if let Ok(entity) = serde_json::from_slice::<MetadataEntity>(&bytes)
+        && let Some(path) = Self::entity_index_path(&entity)
+      {
+        path_to_id.insert(path, entity.id.clone());
+      }
+    }
+
+    *self.path_index_write() = path_to_id;
+    Ok(())
+  }
+
+  fn path_index_read(&self) -> RwLockReadGuard<'_, HashMap<PathBuf, String>> {
+    self
+      .path_to_id
+      .read()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
+  }
+
+  fn path_index_write(&self) -> RwLockWriteGuard<'_, HashMap<PathBuf, String>> {
+    self
+      .path_to_id
+      .write()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
   }
 }
 
@@ -341,12 +414,32 @@ mod tests {
     let temp_dir = TempDir::new()?;
     let manager = IndexManager::open(temp_dir.path())?;
 
+    let entity_path_1 = temp_dir.path().join("entity-1.md");
+    let entity_path_2 = temp_dir.path().join("entity-2.md");
+    std::fs::write(&entity_path_1, "entity-1")?;
+    std::fs::write(&entity_path_2, "entity-2")?;
+
     // Create some entities
-    let entity1 = MetadataEntity::new("id-1", "article", "blog", json!({}), "body1");
-    let entity2 = MetadataEntity::new("id-2", "article", "blog", json!({}), "body2");
+    let entity1 = MetadataEntity::new(
+      "id-1",
+      "article",
+      "blog",
+      json!({"path": entity_path_1.to_string_lossy()}),
+      "body1",
+    );
+    let entity2 = MetadataEntity::new(
+      "id-2",
+      "article",
+      "blog",
+      json!({"path": entity_path_2.to_string_lossy()}),
+      "body2",
+    );
 
     manager.index_entity(&entity1)?;
     manager.index_entity(&entity2)?;
+
+    manager.path_index_write().clear();
+    assert!(manager.get_id_by_path(&entity_path_1).is_none());
 
     // Rebuild indexes
     manager.rebuild()?;
@@ -354,6 +447,8 @@ mod tests {
     // Verify entities are still accessible
     let articles = manager.list_by_type("article")?;
     assert_eq!(articles.len(), 2);
+    assert_eq!(manager.get_id_by_path(&entity_path_1), Some("id-1".to_string()));
+    assert_eq!(manager.get_id_by_path(&entity_path_2), Some("id-2".to_string()));
 
     Ok(())
   }
@@ -405,6 +500,99 @@ mod tests {
       0,
       "Ghost index not cleaned: entity still found in old namespace"
     );
+
+    Ok(())
+  }
+
+  #[test]
+  fn test_get_id_by_path_uses_reverse_index() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let manager = IndexManager::open(temp_dir.path())?;
+    let entity_path = temp_dir.path().join("hero.md");
+    std::fs::write(&entity_path, "hero")?;
+
+    let entity = MetadataEntity::new(
+      "hero-id",
+      "character",
+      "global",
+      json!({"path": entity_path.to_string_lossy()}),
+      "body",
+    );
+
+    manager.index_entity(&entity)?;
+
+    assert_eq!(manager.get_id_by_path(&entity_path), Some("hero-id".to_string()));
+
+    Ok(())
+  }
+
+  #[test]
+  fn test_remove_entity_clears_reverse_index() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let manager = IndexManager::open(temp_dir.path())?;
+    let entity_path = temp_dir.path().join("villain.md");
+    std::fs::write(&entity_path, "villain")?;
+
+    let entity = MetadataEntity::new(
+      "villain-id",
+      "character",
+      "global",
+      json!({"path": entity_path.to_string_lossy()}),
+      "body",
+    );
+
+    manager.index_entity(&entity)?;
+    assert_eq!(manager.get_id_by_path(&entity_path), Some("villain-id".to_string()));
+
+    manager.remove_entity("villain-id")?;
+
+    assert!(manager.get_id_by_path(&entity_path).is_none());
+
+    Ok(())
+  }
+
+  #[test]
+  fn test_get_id_by_path_falls_back_to_original_path() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let manager = IndexManager::open(temp_dir.path())?;
+    let missing_path = temp_dir.path().join("missing.md");
+
+    let entity = MetadataEntity::new(
+      "missing-id",
+      "note",
+      "global",
+      json!({"path": missing_path.to_string_lossy()}),
+      "body",
+    );
+
+    manager.index_entity(&entity)?;
+
+    assert_eq!(manager.get_id_by_path(&missing_path), Some("missing-id".to_string()));
+
+    Ok(())
+  }
+
+  #[test]
+  fn test_open_rebuilds_reverse_index_from_persisted_entities() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let entity_path = temp_dir.path().join("persisted.md");
+    std::fs::write(&entity_path, "persisted")?;
+
+    {
+      let manager = IndexManager::open(temp_dir.path())?;
+      let entity = MetadataEntity::new(
+        "persisted-id",
+        "note",
+        "global",
+        json!({"path": entity_path.to_string_lossy()}),
+        "body",
+      );
+      manager.index_entity(&entity)?;
+      manager.flush()?;
+    }
+
+    let reopened = IndexManager::open(temp_dir.path())?;
+    assert_eq!(reopened.get_id_by_path(&entity_path), Some("persisted-id".to_string()));
 
     Ok(())
   }

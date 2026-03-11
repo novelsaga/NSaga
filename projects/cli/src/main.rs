@@ -1,5 +1,3 @@
-#![feature(mpmc_channel)]
-
 use std::sync::Arc;
 
 use novelsaga_core::state::{feat::Feature, init::Initializer};
@@ -41,7 +39,7 @@ async fn main() {
       lsp::start().await;
     }
     Some(Commands::Init { path }) => {
-      todo!("Init command not implemented yet. Path: {:?}", path);
+      commands::init::run(path);
     }
     Some(Commands::Format { files, check }) => {
       todo!(

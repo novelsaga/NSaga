@@ -1,3 +1,11 @@
+//! **DEPRECATED**: FileWatcher is no longer actively maintained.
+//!
+//! This module has been superseded by LSP's `didChangeWatchedFiles` protocol,
+//! which provides better integration with editor file watching mechanisms.
+//!
+//! Kept for reference and potential future use if direct filesystem watching
+//! becomes necessary again. New code should NOT depend on this module.
+//!
 use std::{
   path::Path,
   sync::mpsc::{Receiver, Sender, channel},
