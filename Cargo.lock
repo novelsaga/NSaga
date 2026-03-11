@@ -1960,7 +1960,6 @@ name = "novelsaga-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-lsp-client",
  "blake3",
  "clap",
  "directories",
@@ -3006,6 +3005,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio 1.1.1",
+ "parking_lot 0.12.5",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
@@ -4273,9 +4273,11 @@ dependencies = [
  "async-lsp-client",
  "clap",
  "diplomat-tool",
+ "lsp-types 0.94.1",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "toml 0.9.8",
  "which",
 ]
