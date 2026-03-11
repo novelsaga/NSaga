@@ -89,6 +89,7 @@ enum Commands {
   },
   /// Run end-to-end tests for CLI
   E2e,
+  LspE2e,
   /// Clean all build artifacts
   CleanAll,
   /// Clean WASM artifacts
@@ -148,6 +149,7 @@ fn main() -> Result<()> {
       _ => anyhow::bail!("Unknown diplomat target: {}", target),
     },
     Commands::E2e => tasks::test::cli::run_e2e_tests()?,
+    Commands::LspE2e => tasks::test::lsp::run_e2e_test()?,
     Commands::CleanAll => tasks::clean::clean_all()?,
     Commands::CleanWasm => tasks::clean::clean_wasm()?,
     Commands::CleanSo => tasks::clean::clean_so()?,

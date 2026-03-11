@@ -60,32 +60,73 @@ impl MetadataEntity {
     frontmatter: Value,
     body: impl Into<String>,
   ) -> Self {
-    let parts = MetadataEntityParts {
+    Self {
       id: id.into(),
       type_: type_.into(),
       namespace: namespace.into(),
       frontmatter,
       body: body.into(),
-    };
-    Self::from_parts(parts)
+    }
   }
 
-  /// Creates a new `MetadataEntity` from `MetadataEntityParts`.
+  /// Creates a new `MetadataEntity` from `MarkdownParts`, file path, and workspace root.
+  ///
+  /// This is the primary factory method that accepts parsed markdown parts and derives
+  /// the id, type, and namespace from the provided paths.
   ///
   /// # Arguments
-  /// * `parts` - The parts needed to construct an entity
+  /// * `parts` - Parsed markdown with separated frontmatter and body
+  /// * `file_path` - Full path to the metadata file
+  /// * `workspace_root` - Path to the workspace root
   ///
   /// # Returns
-  /// New `MetadataEntity` instance
-  #[must_use]
-  pub fn from_parts(parts: MetadataEntityParts) -> Self {
-    Self {
-      id: parts.id,
-      type_: parts.type_,
-      namespace: parts.namespace,
+  /// * `Ok(MetadataEntity)` on success
+  /// * `Err(String)` if id generation fails
+  ///
+  /// # Examples
+  /// ```ignore
+  /// let parts = MarkdownParts::parse(content);
+  /// let entity = MetadataEntity::from_parts(
+  ///   parts,
+  ///   Path::new("/project/metadata/characters/hero.md"),
+  ///   Path::new("/project"),
+  /// )?;
+  /// ```
+  /// ```ignore
+  /// let parts = MarkdownParts::parse(content);
+  /// let entity = MetadataEntity::from_parts(
+  ///   parts,
+  ///   Path::new("/project/metadata/characters/hero.md"),
+  ///   Path::new("/project"),
+  ///   Path::new("/project"),
+  /// )?;
+  /// ```
+  ///
+  /// # Errors
+  /// Returns an error if:
+  /// - The file path does not have a valid filename for ID generation
+  /// - The path resolution or namespace generation fails
+  pub fn from_parts(parts: MarkdownParts, file_path: &Path, workspace_root: &Path) -> Result<Self, String> {
+    // Generate ID from filename (without extension)
+    let id = file_path
+      .file_stem()
+      .and_then(|stem| stem.to_str())
+      .map(ToString::to_string)
+      .ok_or_else(|| "Failed to extract filename for ID".to_string())?;
+
+    // Resolve type: frontmatter takes priority
+    let type_ = resolve_type(file_path, &parts.frontmatter);
+
+    // Generate namespace from file location
+    let namespace = generate_namespace(file_path, workspace_root);
+
+    Ok(Self {
+      id,
+      type_,
+      namespace,
       frontmatter: parts.frontmatter,
       body: parts.body,
-    }
+    })
   }
 
   /// Gets a field value from the frontmatter by key.
@@ -121,6 +162,8 @@ impl TryFrom<(MarkdownParts, &Path, &Path)> for MetadataEntity {
 
   /// Create `MetadataEntity` from markdown parts, file path, and workspace root.
   ///
+  /// This is a convenience wrapper around `from_parts()` for use with the `?` operator.
+  ///
   /// # Arguments
   /// * `markdown_parts` - Parsed markdown with frontmatter and body
   /// * `file_path` - Full path to the metadata file
@@ -128,7 +171,7 @@ impl TryFrom<(MarkdownParts, &Path, &Path)> for MetadataEntity {
   ///
   /// # Returns
   /// * `Ok(MetadataEntity)` on success
-  /// * `Err(String)` if id generation fails
+  /// * `Err(String)` if entity construction fails
   ///
   /// # Examples
   /// ```ignore
@@ -141,29 +184,7 @@ impl TryFrom<(MarkdownParts, &Path, &Path)> for MetadataEntity {
   /// ```
   fn try_from(value: (MarkdownParts, &Path, &Path)) -> Result<Self, Self::Error> {
     let (markdown_parts, file_path, workspace_root) = value;
-
-    // Generate ID from filename (without extension)
-    let id = file_path
-      .file_stem()
-      .and_then(|stem| stem.to_str())
-      .map(ToString::to_string)
-      .ok_or_else(|| "Failed to extract filename for ID".to_string())?;
-
-    // Resolve type: frontmatter takes priority
-    let type_ = resolve_type(file_path, &markdown_parts.frontmatter);
-
-    // Generate namespace from file location
-    let namespace = generate_namespace(file_path, workspace_root);
-
-    let parts = MetadataEntityParts {
-      id,
-      type_,
-      namespace,
-      frontmatter: markdown_parts.frontmatter,
-      body: markdown_parts.body,
-    };
-
-    Ok(Self::from_parts(parts))
+    Self::from_parts(markdown_parts, file_path, workspace_root)
   }
 }
 
@@ -240,20 +261,17 @@ mod tests {
   }
   #[test]
   fn test_from_parts_creates_entity() {
-    let frontmatter = json!({ "author": "John" });
-    let parts = MetadataEntityParts {
-      id: "entity-1".to_string(),
-      type_: "character".to_string(),
-      namespace: "book-01".to_string(),
-      frontmatter,
-      body: "A brave hero".to_string(),
-    };
+    let markdown_content = "---\nauthor: John\n---\nA brave hero";
+    let parts = crate::document::MarkdownParts::parse(markdown_content);
 
-    let entity = MetadataEntity::from_parts(parts);
+    let file_path = Path::new("/project/metadata/characters/entity-1.md");
+    let workspace_root = Path::new("/project");
+
+    let entity = MetadataEntity::from_parts(parts, file_path, workspace_root).unwrap();
 
     assert_eq!(entity.id, "entity-1");
     assert_eq!(entity.type_, "character");
-    assert_eq!(entity.namespace, "book-01");
+    assert_eq!(entity.namespace, "global");
     assert_eq!(entity.body, "A brave hero");
     assert_eq!(entity.get_field("author"), Some(&json!("John")));
   }
@@ -262,18 +280,19 @@ mod tests {
   fn test_from_parts_and_new_equivalent() {
     let frontmatter = json!({ "title": "Test" });
 
-    let parts = MetadataEntityParts {
-      id: "id1".to_string(),
-      type_: "article".to_string(),
-      namespace: "global".to_string(),
-      frontmatter: frontmatter.clone(),
-      body: "content".to_string(),
-    };
-    let entity1 = MetadataEntity::from_parts(parts);
+    let entity1 = MetadataEntity::new("id1", "article", "global", frontmatter.clone(), "content");
 
-    let entity2 = MetadataEntity::new("id1", "article", "global", frontmatter, "content");
+    // Construct a markdown entity from parts for comparison
+    let markdown_content = "---\ntitle: Test\n---\ncontent";
+    let parts = crate::document::MarkdownParts::parse(markdown_content);
+    let file_path = Path::new("/project/metadata/id1.md");
+    let workspace_root = Path::new("/project");
 
-    assert_eq!(entity1, entity2);
+    let entity2 = MetadataEntity::from_parts(parts, file_path, workspace_root).unwrap();
+
+    // Both should have the same frontmatter and body
+    assert_eq!(entity1.frontmatter, entity2.frontmatter);
+    assert_eq!(entity1.body, entity2.body);
   }
 
   #[test]
