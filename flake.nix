@@ -6,7 +6,8 @@
       url = "file+file:///dev/null";
       flake = false;
     };
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/master";
+    nixpkgs-stable.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-parts = {
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
@@ -37,6 +38,7 @@
     devenv-root,
     treefmt-nix,
     rust-overlay,
+    nixpkgs-stable,
     ...
   }: let
     inherit (inputs.nixpkgs) lib;
@@ -58,11 +60,25 @@
         system,
         pkgs,
         ...
-      }: {
+      }: let
+        pkgs-stable = import inputs.nixpkgs-stable {
+          inherit system;
+          config.allowUnfreePredicate = pkg: true;
+        };
+      in {
         _module.args.pkgs = import inputs.nixpkgs {
           inherit system;
           config.allowUnfreePredicate = pkg: true;
-          overlays = [(import rust-overlay)];
+          overlays = [
+            (import rust-overlay)
+            (final: prev: {
+              pkgsCross =
+                prev.pkgsCross
+                // {
+                  ucrtAarch64 = pkgs-stable.pkgsCross.ucrtAarch64;
+                };
+            })
+          ];
         };
         imports = [
           ./nix/packages.nix
