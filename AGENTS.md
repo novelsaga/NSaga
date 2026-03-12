@@ -8,30 +8,35 @@
 - **C Library**: Via Diplomat FFI for iOS, Android, Web (.so/WASM)
 - **JS Bridges**: JSON-RPC 2.0 communication between Rust CLI and Node.js/Bun/Deno
 
-## STRUCTURE
+## TECHNOLOGY STACK
+
+- **Rust**: Core logic, LSP server, and FFI bindings.
+- **TypeScript**: Bridge implementations and client-side tooling.
+- **Diplomat FFI**: Generates bindings for multiple languages from Rust source.
+- **JSON-RPC 2.0**: Protocol for CLI-to-Bridge communication.
+- **Nix**: Reproducible development environments and builds.
+
+## PROJECT STRUCTURE
 
 ```
 nsaga/
 ├── projects/
-│   ├── core/              # Rust core library - see projects/core/AGENTS.md
-│   ├── cli/               # Rust LSP server & CLI - see projects/cli/AGENTS.md
-│   └── cli-js-bridges/    # TypeScript bridges - see projects/cli-js-bridges/AGENTS.md
-├── xtask/                 # Build automation (Rust)
-├── docs/                  # Documentation
-├── .opencode/             # OpenCode agent config, commands, progress tracking
-└── out/                   # Build outputs
+│   ├── core/              # Rust core library: state, config, and domain logic
+│   ├── cli/               # Rust LSP server & CLI: bridge management and discovery
+│   └── cli-js-bridges/    # TypeScript bridges: filesystem, git, and external services
+├── xtask/                 # Build automation and development workflows
+├── docs/                  # Project documentation
+└── out/                   # Compiled outputs and build artifacts
 ```
 
-## WHERE TO LOOK
+## METADATA STORAGE CONTRACT
 
-| Task            | Location                    | Notes                             |
-| --------------- | --------------------------- | --------------------------------- |
-| Rust core logic | `projects/core/src/`        | Config, state management          |
-| CLI/LSP server  | `projects/cli/src/`         | Bridge manager, runtime discovery |
-| JS bridges      | `projects/cli-js-bridges/`  | JSON-RPC services                 |
-| Build tasks     | `xtask/src/tasks/`          | build-js, cli, wasm, so           |
-| Config types    | `projects/core/src/config/` | `ts-rs` exports to TypeScript     |
-| Tests (Rust)    | Same file as source         | `#[cfg(test)]` modules            |
+NovelSaga maintains a persistent metadata store for indexing and state management.
+
+- **Canonical Path**: `<workspace>/.cache/novelsaga/sled`
+- **Database**: Sled (embedded key-value store)
+- **Shared Access**: The CLI and LSP server share the same database by resolving the canonical path relative to the workspace root.
+- **Fallback Policy**: The resolver uses a pure context-derived fallback. It does not rely on specific markers like `metadata/`.
 
 ## QUICK COMMANDS
 
@@ -40,189 +45,74 @@ nsaga/
 direnv allow                          # Load Nix environment
 
 # Build
-pnpm install                          # Install JS deps (root only!)
-xtask build-js                        # Build JS bridges (includes type generation)
-xtask cli                             # Build CLI (current platform)
-xtask build-all                       # Build everything
-cargo build                           # Rust build
+pnpm install                          # Install JS deps (root only)
+xtask build-js                        # Build JS bridges and generate types
+xtask cli                             # Build CLI for the current platform
+xtask build-all                       # Build the entire project
+cargo build                           # Standard Rust build
 
 # Test
-cargo test                            # All Rust tests
-cargo test -p novelsaga-cli           # CLI tests only
-cargo test <test_name> -- --ignored   # Run ignored integration tests
-xtask e2e                             # End-to-end tests
+cargo test                            # Run all Rust tests
+cargo test -p novelsaga-cli           # Run CLI tests only
+cargo test <name> -- --ignored        # Run specific ignored tests
+xtask e2e                             # Execute end-to-end tests
 
 # Lint & Format
-cargo clippy --all-targets            # Rust linting
-pnpm exec eslint .                    # JS/TS linting
-pnpm exec prettier --write .          # Format JS/TS
+cargo clippy --all-targets            # Lint Rust code
+pnpm exec eslint .                    # Lint JS/TS code
+pnpm exec prettier --write .          # Format JS/TS code
 
 # Nix Build
 nix build                             # Build CLI via Nix
-nix build .#bundle                    # Build all platforms
+nix build .#bundle                    # Build all platform bundles
 ```
 
 ## CONVENTIONS
 
 ### Rust
 
-- **Edition 2024**, nightly features (`#![feature(mpmc_channel)]`)
-- Tests in same file using `#[cfg(test)]` modules
-- Type exports to TS: `#[derive(TS)]` + `#[ts(export, export_to = "_config.ts")]`
-- Generated TS types location: `projects/cli-js-bridges/config-bridge/src/types/_config.ts`
-- State init: `Initializer::init(feature)` before `Initializer::get()`
+- **Edition 2024**: Nightly features allowed (e.g., `#![feature(mpmc_channel)]`).
+- **In-file Tests**: Modules marked with `#[cfg(test)]` stay in the same file as source.
+- **Type Exports**: Use `#[derive(TS)]` with `#[ts(export, export_to = "_config.ts")]` for TS integration.
+- **State Initialization**: Call `Initializer::init(feature)` before attempting `Initializer::get()`.
 
 ### TypeScript/JavaScript
 
-- **Node.js ≥20**, ESM modules (`"type": "module"`)
-- **pnpm workspace** - never install deps at subproject level
-- Bridge pattern: `createBridgeServer()` factory + Service registration
-- JSON-RPC routing: `"service.method"` format
+- **Runtime**: Node.js ≥20 (Native TS support preferred for newer versions).
+- **Modules**: ESM only (`"type": "module"`).
+- **Package Management**: pnpm workspaces. Never install dependencies in subprojects.
+- **Bridge Pattern**: Use `createBridgeServer()` factories for service registration.
+- **Routing**: Use `"service.method"` format for JSON-RPC calls.
 
 ### Git & Commits
 
-- Commits: Conventional commits (`feat:`, `fix:`, `refactor:`)
-- Pre-commit hooks: commitizen, clippy, treefmt
+- **Style**: Conventional commits (`feat:`, `fix:`, `refactor:`).
+- **Hooks**: Automated checks via clippy and treefmt.
 
 ## ANTI-PATTERNS
 
-| Category     | Forbidden                         | Do Instead                                             |
-| ------------ | --------------------------------- | ------------------------------------------------------ |
-| Dependencies | `npm install` in subproject       | `pnpm install` at root                                 |
-| Types        | Modify `_config.ts`               | Extend in separate files (generated by xtask build-js) |
-| State        | `Initializer::get()` without init | Call `init()` first                                    |
-| Bridges      | Relative imports outside rootDir  | Use `@nsaga/bridge-*`                                  |
-| Logs         | stdout in bridges                 | stderr for logs, stdout for JSON                       |
-| Tests        | Separate test files               | Same file `#[cfg(test)]`                               |
-
-## AI AGENT GUIDELINES
-
-### Communication
-
-1. **Seek Confirmation**: Ask before significant changes
-2. **Interactive**: Stop at ambiguity, confirm architecture decisions
-3. **Incremental**: Break complex tasks into steps with checkpoints
-
-### Documentation
-
-- AI-generated docs: `.sisyphus/notepads/` (session working memory)
-- After refactoring: ALWAYS update related docs
-- Never scatter docs across project
-
-### Common Pitfalls
-
-- Shell aliases: `ls→eza`, `cat→bat` - use tool functions instead
-- Node version: Native TS requires ≥23.6
-- Config search: Upward from current dir to workspace root
-
-## PROGRESS TRACKING
-
-- **Roadmaps**: See `.sisyphus/roadmaps/` (priorities, design specs, backlog)
-- **Active Plans**: See `.sisyphus/plans/` (executable boulder plans)
-- **Archived Plans**: See `.sisyphus/plans/archive/`
+| Category     | Forbidden                                    | Do Instead                                      |
+| :----------- | :------------------------------------------- | :---------------------------------------------- |
+| Dependencies | `npm install` in subprojects                 | `pnpm install` at workspace root                |
+| Types        | Manual edits to `_config.ts`                 | Extend types in separate files                  |
+| State        | Accessing `Initializer` before `init`        | Ensure `init()` is called during startup        |
+| Bridges      | Relative imports crossing project boundaries | Use `@nsaga/` workspace aliases                 |
+| Logs         | Printing to `stdout` in bridges              | Use `stderr` for logs; `stdout` is for JSON-RPC |
+| Tests        | Creating separate `.test.rs` files           | Keep tests in the source file                   |
 
 ## VSCODE DEVELOPMENT
 
 ### Recommended Setup
 
-1. **Install extensions**: Open workspace → Accept recommended extensions prompt
-2. **Load environment**: `direnv allow` in terminal (critical for Nix)
-3. **Verify**: Check rust-analyzer and ESLint are active in status bar
+1. **Install Extensions**: Accept the workspace recommended extensions.
+2. **Environment**: Run `direnv allow` in your terminal to sync the Nix environment.
+3. **Status Bar**: Confirm `rust-analyzer` and `ESLint` are active.
 
-### Extension Categories
+### Keyboard Shortcuts
 
-| Category       | Extensions                              | Purpose                    |
-| -------------- | --------------------------------------- | -------------------------- |
-| **Rust**       | rust-analyzer, Even Better TOML, crates | Core Rust development      |
-| **TypeScript** | ESLint, Prettier, Error Lens            | JS/TS linting & formatting |
-| **Nix**        | direnv, Nix IDE                         | Environment management     |
-| **AI**         | Continue.dev, GitHub Copilot            | AI-assisted coding         |
-| **Workspace**  | Monorepo Workspace, GitLens             | Navigation & git           |
-
-### Keyboard Shortcuts (Productivity)
-
-| Action              | macOS    | Windows/Linux  | Notes                 |
-| ------------------- | -------- | -------------- | --------------------- |
-| Go to Definition    | `F12`    | `F12`          | Works for Rust & TS   |
-| Find All References | `⇧F12`   | `Shift+F12`    | Cross-language        |
-| Rename Symbol       | `F2`     | `F2`           | LSP-powered refactor  |
-| Quick Fix           | `⌘.`     | `Ctrl+.`       | Clippy & ESLint fixes |
-| Command Palette     | `⌘⇧P`    | `Ctrl+Shift+P` | All commands          |
-| Integrated Terminal | `` ⌃` `` | `` Ctrl+` ``   | Run commands          |
-| Search Files        | `⌘P`     | `Ctrl+P`       | Quick file open       |
-| Search Symbols      | `⌘T`     | `Ctrl+T`       | Workspace symbols     |
-
-### AI Assistant Integration
-
-#### GitHub Copilot
-
-- `⌘I` / `Ctrl+I` - Inline chat
-- Follows `.github/copilot-instructions.md` automatically
-- Best for: Quick completions, simple refactors
-
-#### Continue.dev
-
-- `⌘L` / `Ctrl+L` - Open Continue chat
-- `⌘⇧L` / `Ctrl+Shift+L` - Add selection to chat
-- `@codebase` - Search entire codebase
-- `@file` - Reference specific file
-- Best for: Complex tasks, multi-file changes
-
-### Troubleshooting
-
-| Issue                     | Solution                                                         |
-| ------------------------- | ---------------------------------------------------------------- |
-| rust-analyzer not loading | Run `direnv allow`, then reload window (`⌘⇧P` → "Reload Window") |
-| ESLint not working        | Verify `pnpm install` completed at root                          |
-| Types seem outdated       | Run `xtask build-js` to regenerate                               |
-| Nix env not active        | Check terminal shows Nix-provided tools                          |
-| Extensions not installed  | `⌘⇧P` → "Extensions: Show Recommended Extensions"                |
-
-## OPENCODE SKILLS
-
-The OpenCode skills system provides AI agents with specialized knowledge for different development tasks. Each skill contains best practices, anti-patterns, and clear guidance on when to use it.
-
-### Available Skills
-
-**Core Development**
-
-- [`core-dev`](.opencode/skills/core-dev/SKILL.md) - Rust core library development, state management, type exports
-- [`cli-dev`](.opencode/skills/cli-dev/SKILL.md) - CLI and bridge management, command structure
-- [`lsp-dev`](.opencode/skills/lsp-dev/SKILL.md) - LSP protocol implementation and language server features
-- [`ts-bridge`](.opencode/skills/ts-bridge/SKILL.md) - TypeScript bridges and JSON-RPC services
-- [`ffi-diplomat`](.opencode/skills/ffi-diplomat/SKILL.md) - FFI bindings using Diplomat
-
-**Build & Environment**
-
-- [`nix-env`](.opencode/skills/nix-env/SKILL.md) - Nix development environment setup
-- [`nix-build`](.opencode/skills/nix-build/SKILL.md) - Nix build system and reproducible builds
-- [`nix-workflow`](.opencode/skills/nix-workflow/SKILL.md) - Complete Nix environment and build workflows
-
-**Project Guidance**
-
-- [`project-architecture`](.opencode/skills/project-architecture/SKILL.md) - Module relationships and system design
-- [`end-to-end-workflow`](.opencode/skills/end-to-end-workflow/SKILL.md) - Decision tree for feature development
-- [`testing-guide`](.opencode/skills/testing-guide/SKILL.md) - NovelSaga testing patterns
-
-**Maintenance**
-
-- [`docs-maintenance`](.opencode/skills/docs-maintenance/SKILL.md) - Documentation maintenance and plan archiving
-
-### Using Skills
-
-Skills are designed to be loaded based on the task context:
-
-- Single task: Load one specific skill
-- Multi-faceted task: Load multiple related skills
-- New feature: Load `end-to-end-workflow` + component skills
-- Architecture questions: Load `project-architecture` + relevant skills
-
-See [`.opencode/skills/README.md`](.opencode/skills/README.md) for detailed skill selection guide and usage examples.
-
-## MODULE GUIDES
-
-For detailed module-specific information, see:
-
-- [`projects/core/AGENTS.md`](projects/core/AGENTS.md) - Core library details
-- [`projects/cli/AGENTS.md`](projects/cli/AGENTS.md) - CLI & LSP server details
-- [`projects/cli-js-bridges/AGENTS.md`](projects/cli-js-bridges/AGENTS.md) - JS bridge details
+- **Go to Definition**: `F12`
+- **Find All References**: `Shift + F12`
+- **Rename Symbol**: `F2`
+- **Quick Fix**: `Ctrl + .` (or `Cmd + .`)
+- **Command Palette**: `Ctrl + Shift + P`
+- **Search Files**: `Ctrl + P`
