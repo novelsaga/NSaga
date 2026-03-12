@@ -49,7 +49,7 @@ impl MetadataResolver {
       return Ok(Self::canonical_path(workspace));
     }
 
-    // Priority 2-4: Check all context paths for metadata/ marker or legacy paths
+    // Priority 2-4: Check all context paths for legacy or metadata/ marker
     let candidates = [
       context.cli_target_path.as_ref(),
       context.cli_cwd.as_ref(),
@@ -58,19 +58,37 @@ impl MetadataResolver {
     ];
 
     for candidate in candidates.iter().flatten() {
-      // Check for legacy .novelsaga/cache/index at THIS LEVEL ONLY (deterministic migration)
-      // Only check direct path, don't search upward for legacy
-      let legacy_check = candidate.join(".novelsaga/cache/index");
-      if legacy_check.exists() {
-        if let Err(e) = Self::migrate_legacy_data(candidate) {
-          eprintln!("[novelsaga] Warning: legacy migration failed: {e}");
+      // Walk upward from candidate, checking legacy before metadata at EACH level
+      let mut current = if candidate.is_dir() {
+        (*candidate).clone()
+      } else {
+        match candidate.parent() {
+          Some(p) => p.to_path_buf(),
+          None => continue,
         }
-        return Ok(Self::canonical_path(candidate));
-      }
+      };
 
-      // Check for metadata/ marker (search upward)
-      if let Some(workspace) = Self::find_metadata_marker(candidate) {
-        return Ok(Self::canonical_path(&workspace));
+      loop {
+        // Check for legacy .novelsaga/cache/index at THIS level
+        let legacy_check = current.join(".novelsaga/cache/index");
+        if legacy_check.exists() {
+          if let Err(e) = Self::migrate_legacy_data(&current) {
+            eprintln!("[novelsaga] Warning: legacy migration failed: {e}");
+          }
+          return Ok(Self::canonical_path(&current));
+        }
+
+        // Check for metadata/ marker at THIS level
+        let metadata_dir = current.join("metadata");
+        if metadata_dir.is_dir() {
+          return Ok(Self::canonical_path(&current));
+        }
+
+        // Move up to parent
+        match current.parent() {
+          Some(parent) => current = parent.to_path_buf(),
+          None => break,
+        }
       }
     }
 
@@ -84,61 +102,6 @@ impl MetadataResolver {
   /// `<workspace>/.cache/novelsaga/sled`
   pub fn canonical_path(workspace: &Path) -> PathBuf {
     workspace.join(".cache/novelsaga/sled")
-  }
-
-  /// Detect `metadata/` directory in the path hierarchy.
-  ///
-  /// Searches upward from the given path to find a `metadata/` directory.
-  /// If found, returns the parent of `metadata/` (the workspace root).
-  ///
-  /// # Returns
-  /// `Some(workspace_root)` if `metadata/` is found, `None` otherwise.
-  fn find_metadata_marker(start_path: &Path) -> Option<PathBuf> {
-    // Start from the path itself if it's a directory, or its parent if it's a file
-    let mut current = if start_path.is_dir() {
-      start_path.to_path_buf()
-    } else {
-      start_path.parent()?.to_path_buf()
-    };
-
-    loop {
-      let metadata_dir = current.join("metadata");
-      if metadata_dir.is_dir() {
-        return Some(current);
-      }
-
-      match current.parent() {
-        Some(parent) => current = parent.to_path_buf(),
-        None => return None,
-      }
-    }
-  }
-
-  /// Detect legacy `.novelsaga/cache/index` path.
-  ///
-  /// Searches for the legacy metadata storage location and returns the workspace root.
-  ///
-  /// # Returns
-  /// `Some(workspace_root)` if legacy path is found, `None` otherwise.
-  fn find_legacy_path(start_path: &Path) -> Option<PathBuf> {
-    // Start from the path itself if it's a directory, or its parent if it's a file
-    let mut current = if start_path.is_dir() {
-      start_path.to_path_buf()
-    } else {
-      start_path.parent()?.to_path_buf()
-    };
-
-    loop {
-      let legacy_index = current.join(".novelsaga/cache/index");
-      if legacy_index.exists() {
-        return Some(current);
-      }
-
-      match current.parent() {
-        Some(parent) => current = parent.to_path_buf(),
-        None => return None,
-      }
-    }
   }
 
   /// Migrate legacy `.novelsaga/cache/index` data to canonical path.
