@@ -3,7 +3,6 @@
 //! The resolver handles multiple resolution strategies:
 //! 1. **Explicit workspace root** → canonical path: `<workspace>/.cache/novelsaga/sled`
 //! 2. **Fallback root from context** → CLI target path, CLI cwd, show target parent, or LSP startup directory
-//! 3. **metadata/ heuristic** → recognizes `metadata/` directory as valid workspace marker
 
 use std::path::{Path, PathBuf};
 
@@ -33,8 +32,7 @@ impl MetadataResolver {
   ///
   /// # Resolution Priority
   /// 1. If explicit `workspace_root` is provided → use it
-  /// 2. If `metadata/` directory is found in any context path → use its parent
-  /// 4. Use first available context path (CLI target, CLI cwd, show parent, LSP startup)
+  /// 2. Use first available context path (CLI target, CLI cwd, show parent, LSP startup)
   ///
   /// # Returns
   /// The canonical metadata path: `<workspace>/.cache/novelsaga/sled`
@@ -44,7 +42,6 @@ impl MetadataResolver {
       return Ok(Self::canonical_path(workspace));
     }
 
-    // Priority 2-4: Check all context paths for legacy or metadata/ marker
     let candidates = [
       context.cli_target_path.as_ref(),
       context.cli_cwd.as_ref(),
@@ -53,33 +50,27 @@ impl MetadataResolver {
     ];
 
     for candidate in candidates.iter().flatten() {
-      // Walk upward from candidate, checking legacy before metadata at EACH level
-      let mut current = if candidate.is_dir() {
-        (*candidate).clone()
-      } else {
-        match candidate.parent() {
-          Some(p) => p.to_path_buf(),
-          None => continue,
-        }
+      let Some(anchor) = Self::candidate_anchor(candidate) else {
+        continue;
       };
 
-      loop {
-        // Check for metadata/ marker at THIS level
-        let metadata_dir = current.join("metadata");
-        if metadata_dir.is_dir() {
-          return Ok(Self::canonical_path(&current));
-        }
-
-        // Move up to parent
-        match current.parent() {
-          Some(parent) => current = parent.to_path_buf(),
-          None => break,
-        }
-      }
+      return Ok(Self::canonical_path(&anchor));
     }
 
     // No valid paths found
     Err(ResolverError::NoValidWorkspaceFound)
+  }
+
+  fn candidate_anchor(candidate: &Path) -> Option<PathBuf> {
+    if candidate.as_os_str().is_empty() {
+      return None;
+    }
+
+    if candidate.extension().is_some() {
+      return candidate.parent().map(Path::to_path_buf);
+    }
+
+    Some(candidate.to_path_buf())
   }
 
   /// Compute the canonical metadata path for a workspace.
@@ -123,8 +114,6 @@ impl std::error::Error for ResolverError {}
 
 #[cfg(test)]
 mod tests {
-  use std::fs;
-
   use tempfile::TempDir;
 
   use super::*;
@@ -158,9 +147,6 @@ mod tests {
     let temp_dir = TempDir::new()?;
     let workspace_root = temp_dir.path().to_path_buf();
 
-    // Create metadata/ marker to simulate valid workspace
-    fs::create_dir(workspace_root.join("metadata"))?;
-
     let context = ResolutionContext {
       workspace_root: None,
       cli_target_path: Some(workspace_root.clone()),
@@ -172,10 +158,7 @@ mod tests {
     let resolved = MetadataResolver::resolve(&context)?;
     let expected = workspace_root.join(".cache/novelsaga/sled");
 
-    assert_eq!(
-      resolved, expected,
-      "Should fallback to CLI target path with metadata/ marker"
-    );
+    assert_eq!(resolved, expected, "Should fallback to CLI target path directly");
 
     Ok(())
   }
@@ -184,9 +167,6 @@ mod tests {
   fn test_fallback_to_cli_cwd() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
     let workspace_root = temp_dir.path().to_path_buf();
-
-    // Create metadata/ marker
-    fs::create_dir(workspace_root.join("metadata"))?;
 
     let context = ResolutionContext {
       workspace_root: None,
@@ -199,7 +179,7 @@ mod tests {
     let resolved = MetadataResolver::resolve(&context)?;
     let expected = workspace_root.join(".cache/novelsaga/sled");
 
-    assert_eq!(resolved, expected, "Should fallback to CLI cwd with metadata/ marker");
+    assert_eq!(resolved, expected, "Should fallback to CLI cwd directly");
 
     Ok(())
   }
@@ -208,9 +188,6 @@ mod tests {
   fn test_fallback_to_show_target_parent() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
     let workspace_root = temp_dir.path().to_path_buf();
-
-    // Create metadata/ marker
-    fs::create_dir(workspace_root.join("metadata"))?;
 
     let context = ResolutionContext {
       workspace_root: None,
@@ -223,10 +200,7 @@ mod tests {
     let resolved = MetadataResolver::resolve(&context)?;
     let expected = workspace_root.join(".cache/novelsaga/sled");
 
-    assert_eq!(
-      resolved, expected,
-      "Should fallback to show target parent with metadata/ marker"
-    );
+    assert_eq!(resolved, expected, "Should fallback to show target parent directly");
 
     Ok(())
   }
@@ -235,9 +209,6 @@ mod tests {
   fn test_fallback_to_lsp_startup_dir() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
     let workspace_root = temp_dir.path().to_path_buf();
-
-    // Create metadata/ marker
-    fs::create_dir(workspace_root.join("metadata"))?;
 
     let context = ResolutionContext {
       workspace_root: None,
@@ -250,30 +221,22 @@ mod tests {
     let resolved = MetadataResolver::resolve(&context)?;
     let expected = workspace_root.join(".cache/novelsaga/sled");
 
-    assert_eq!(
-      resolved, expected,
-      "Should fallback to LSP startup dir with metadata/ marker"
-    );
+    assert_eq!(resolved, expected, "Should fallback to LSP startup dir directly");
 
     Ok(())
   }
 
   #[test]
-  fn test_metadata_heuristic_finds_metadata_directory() -> Result<(), Box<dyn std::error::Error>> {
+  fn test_cli_target_file_uses_parent_directory() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
     let workspace_root = temp_dir.path().to_path_buf();
 
-    // Create metadata/ subdirectory
-    fs::create_dir(workspace_root.join("metadata"))?;
-
-    // Create a nested file path to search from
-    let nested_file = workspace_root.join("metadata").join("file.md");
-    fs::create_dir_all(nested_file.parent().unwrap())?;
-    fs::File::create(&nested_file)?;
+    let target_file = workspace_root.join("chapter-1.md");
+    std::fs::File::create(&target_file)?;
 
     let context = ResolutionContext {
       workspace_root: None,
-      cli_target_path: Some(nested_file),
+      cli_target_path: Some(target_file),
       cli_cwd: None,
       show_target_parent: None,
       lsp_startup_dir: None,
@@ -282,7 +245,10 @@ mod tests {
     let resolved = MetadataResolver::resolve(&context)?;
     let expected = workspace_root.join(".cache/novelsaga/sled");
 
-    assert_eq!(resolved, expected, "Should recognize metadata/ as workspace marker");
+    assert_eq!(
+      resolved, expected,
+      "File target should resolve using its parent directory"
+    );
 
     Ok(())
   }
@@ -322,9 +288,6 @@ mod tests {
     let workspace1 = temp_dir1.path().to_path_buf();
     let workspace2 = temp_dir2.path().to_path_buf();
 
-    // Create metadata/ marker in workspace2
-    fs::create_dir(workspace2.join("metadata"))?;
-
     let context = ResolutionContext {
       workspace_root: Some(workspace1.clone()),
       cli_target_path: Some(workspace2.clone()),
@@ -352,10 +315,6 @@ mod tests {
     let workspace1 = temp_dir1.path().to_path_buf();
     let workspace2 = temp_dir2.path().to_path_buf();
 
-    // Create metadata/ marker in both
-    fs::create_dir(workspace1.join("metadata"))?;
-    fs::create_dir(workspace2.join("metadata"))?;
-
     let context = ResolutionContext {
       workspace_root: None,
       cli_target_path: Some(workspace1.clone()),
@@ -368,6 +327,45 @@ mod tests {
     let expected = workspace1.join(".cache/novelsaga/sled");
 
     assert_eq!(resolved, expected, "CLI target path should take priority over CLI cwd");
+
+    Ok(())
+  }
+
+  #[test]
+  fn test_cli_lsp_database_consistency() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let workspace = temp_dir.path().to_path_buf();
+    let cli_target_file = workspace.join("file.md");
+    std::fs::File::create(&cli_target_file)?;
+
+    let cli_context = ResolutionContext {
+      workspace_root: None,
+      cli_target_path: Some(cli_target_file),
+      cli_cwd: None,
+      show_target_parent: None,
+      lsp_startup_dir: None,
+    };
+
+    let lsp_context = ResolutionContext {
+      workspace_root: None,
+      cli_target_path: None,
+      cli_cwd: None,
+      show_target_parent: None,
+      lsp_startup_dir: Some(workspace.clone()),
+    };
+
+    let cli_path = MetadataResolver::resolve(&cli_context)?;
+    let lsp_path = MetadataResolver::resolve(&lsp_context)?;
+
+    assert_eq!(
+      cli_path, lsp_path,
+      "CLI and LSP should resolve to the same canonical database path"
+    );
+    assert_eq!(
+      cli_path,
+      workspace.join(".cache/novelsaga/sled"),
+      "Canonical database path should be <workspace>/.cache/novelsaga/sled"
+    );
 
     Ok(())
   }
