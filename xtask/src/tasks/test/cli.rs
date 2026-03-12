@@ -75,8 +75,7 @@ impl ConfigType {
       ConfigType::JsEsm => {
         r#"export default {
   workspace: {
-    cache_dir: ".novelsaga/cache",
-    novelsaga_dir: ".novelsaga"
+    cache_dir: ".cache/novelsaga"
   },
   fmt: {
     indent_spaces: 2,
@@ -87,8 +86,7 @@ impl ConfigType {
       ConfigType::JsCjs => {
         r#"module.exports = {
   workspace: {
-    cache_dir: ".novelsaga/cache",
-    novelsaga_dir: ".novelsaga"
+    cache_dir: ".cache/novelsaga"
   },
   fmt: {
     indent_spaces: 2,
@@ -100,7 +98,6 @@ impl ConfigType {
         r#"// TypeScript ESM with type annotations
 interface WorkspaceConfig {
   cache_dir: string;
-  novelsaga_dir: string;
 }
 
 interface FmtConfig {
@@ -115,8 +112,7 @@ interface NovelSagaConfig {
 
 const config: NovelSagaConfig = {
   workspace: {
-    cache_dir: ".novelsaga/cache",
-    novelsaga_dir: ".novelsaga"
+    cache_dir: ".cache/novelsaga"
   },
   fmt: {
     indent_spaces: 2,
@@ -130,7 +126,6 @@ export default config;"#
         r#"// TypeScript CommonJS with type annotations
 interface WorkspaceConfig {
   cache_dir: string;
-  novelsaga_dir: string;
 }
 
 interface FmtConfig {
@@ -145,8 +140,7 @@ interface NovelSagaConfig {
 
 const config: NovelSagaConfig = {
   workspace: {
-    cache_dir: ".novelsaga/cache",
-    novelsaga_dir: ".novelsaga"
+    cache_dir: ".cache/novelsaga"
   },
   fmt: {
     indent_spaces: 2,
@@ -310,7 +304,7 @@ fn test_config_priority() -> Result<()> {
 
   fs::write(
     dir.path().join("novelsaga.config.mjs"),
-    r#"export default {workspace:{cache_dir:".novelsaga/cache"}};"#,
+    r#"export default {workspace:{cache_dir:".cache/novelsaga"}};"#,
   )?;
 
   let cli_bin = get_cli_binary()?;

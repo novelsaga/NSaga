@@ -1,3 +1,17 @@
+
+---
+
+## Post-Completion Audit (2026-03-12)
+
+### Metadata Storage Contract Remediation
+
+Following the completion of this plan, an audit identified inconsistent storage paths between the CLI and LSP entrypoints (R1-R6 in the Risk Register). A subsequent remediation was performed to unify the storage contract:
+
+- **Canonical Path**: `<workspace>/.cache/novelsaga/sled` is now the single source of truth for metadata storage.
+- **Unified Resolver**: Implementation of `MetadataResolver` in `projects/cli/src/metadata/resolver.rs` ensures path consistency across all modules.
+- **Legacy Migration**: Automatic migration from `.novelsaga/cache/index` to the new standard path has been verified.
+- **Global Fallback Removal**: Strictly project-scoped storage policy enforced to prevent cross-project contamination.
+- **Verification**: Integration tests (`tests/cli_lsp_integration.rs`) confirm that both CLI and LSP reliably read and write to the same database under identical workspace roots.
 # NovelSaga Metadata System Completion Plan
 
 ## TL;DR

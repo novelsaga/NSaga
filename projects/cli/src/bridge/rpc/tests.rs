@@ -35,8 +35,7 @@ mod integration_tests {
       &config_path,
       r#"export default {
   workspace: {
-    cache_dir: ".novelsaga/cache",
-    novelsaga_dir: ".novelsaga"
+    cache_dir: ".cache/novelsaga"
   },
   fmt: {
     indent: 2,
@@ -101,8 +100,7 @@ mod integration_tests {
       &config_path,
       r#"export default {
   workspace: {
-    cache_dir: ".novelsaga/cache",
-    novelsaga_dir: ".novelsaga"
+    cache_dir: ".cache/novelsaga"
   },
   fmt: {
     indent: 2,
@@ -157,8 +155,7 @@ mod integration_tests {
       &config_path,
       r#"export default {
   workspace: {
-    cache_dir: ".novelsaga/cache",
-    novelsaga_dir: ".novelsaga"
+    cache_dir: ".cache/novelsaga"
   },
   fmt: {
     indent: 2,
@@ -242,8 +239,7 @@ mod integration_tests {
       &config_path,
       r#"export default (settings) => ({
   workspace: {
-    cache_dir: ".novelsaga/cache",
-    novelsaga_dir: ".novelsaga"
+    cache_dir: ".cache/novelsaga"
   },
   fmt: {
     indent: 2,

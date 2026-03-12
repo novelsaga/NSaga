@@ -720,21 +720,11 @@ impl LanguageServer for Backend {
           )));
         }
 
-        let context = ResolutionContext {
-          workspace_root: None,
-          cli_target_path: Some(path.clone()),
-          cli_cwd: None,
-          show_target_parent: None,
-          lsp_startup_dir: None,
-        };
-        let db_path = MetadataResolver::resolve(&context)
-          .map_err(|error| to_internal_error(format!("Failed to resolve metadata database path for index: {error}")))?;
-        let index_manager = IndexManager::open(&db_path).map_err(|error| {
-          to_internal_error(format!(
-            "Failed to open metadata index at {}: {error}",
-            db_path.display()
-          ))
-        })?;
+        let index_manager = self
+          .index_manager()
+          .await
+          .ok_or_else(|| to_internal_error("Metadata index manager is not initialized".to_string()))?;
+        let db_path = index_manager.db_path().to_path_buf();
 
         let md_files: Vec<PathBuf> = WalkDir::new(&path)
           .into_iter()
@@ -802,22 +792,11 @@ impl LanguageServer for Backend {
           .log_message(MessageType::INFO, "Executing novelsaga/list command")
           .await;
 
-        let workspace_root = { self.workspace_root.read().await.clone() };
-        let context = ResolutionContext {
-          workspace_root,
-          cli_target_path: None,
-          cli_cwd: None,
-          show_target_parent: None,
-          lsp_startup_dir: None,
-        };
-        let db_path = MetadataResolver::resolve(&context)
-          .map_err(|error| to_internal_error(format!("Failed to resolve metadata database path for list: {error}")))?;
-        let index_manager = IndexManager::open(&db_path).map_err(|error| {
-          to_internal_error(format!(
-            "Failed to open metadata index at {}: {error}",
-            db_path.display()
-          ))
-        })?;
+        let index_manager = self
+          .index_manager()
+          .await
+          .ok_or_else(|| to_internal_error("Metadata index manager is not initialized".to_string()))?;
+        let db_path = index_manager.db_path().to_path_buf();
         let entities = index_manager.list_all().map_err(|error| {
           to_internal_error(format!(
             "Failed to list metadata entities from {}: {error}",
@@ -850,28 +829,11 @@ impl LanguageServer for Backend {
         let canonical_path = PathBuf::from(path_str)
           .canonicalize()
           .map_err(|error| to_invalid_params(format!("Failed to canonicalize show path '{path_str}': {error}")))?;
-        let show_target_parent = canonical_path.parent().map(Path::to_path_buf).ok_or_else(|| {
-          to_invalid_params(format!(
-            "Failed to get parent directory for show path: {}",
-            canonical_path.display()
-          ))
-        })?;
-
-        let context = ResolutionContext {
-          workspace_root: None,
-          cli_target_path: None,
-          cli_cwd: None,
-          show_target_parent: Some(show_target_parent),
-          lsp_startup_dir: None,
-        };
-        let db_path = MetadataResolver::resolve(&context)
-          .map_err(|error| to_internal_error(format!("Failed to resolve metadata database path for show: {error}")))?;
-        let index_manager = IndexManager::open(&db_path).map_err(|error| {
-          to_internal_error(format!(
-            "Failed to open metadata index at {}: {error}",
-            db_path.display()
-          ))
-        })?;
+        let index_manager = self
+          .index_manager()
+          .await
+          .ok_or_else(|| to_internal_error("Metadata index manager is not initialized".to_string()))?;
+        let db_path = index_manager.db_path().to_path_buf();
 
         let entity_id = IndexManager::generate_id(&canonical_path.to_string_lossy());
         let entity = index_manager.get_by_id(&entity_id).map_err(|error| {

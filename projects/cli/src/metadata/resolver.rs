@@ -4,12 +4,8 @@
 //! 1. **Explicit workspace root** → canonical path: `<workspace>/.cache/novelsaga/sled`
 //! 2. **Fallback root from context** → CLI target path, CLI cwd, show target parent, or LSP startup directory
 //! 3. **metadata/ heuristic** → recognizes `metadata/` directory as valid workspace marker
-//! 4. **Legacy migration** → detects `.novelsaga/cache/index` and migrates to canonical path
 
-use std::{
-  fs,
-  path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 /// Configuration for metadata path resolution
 #[allow(dead_code)]
@@ -38,7 +34,6 @@ impl MetadataResolver {
   /// # Resolution Priority
   /// 1. If explicit `workspace_root` is provided → use it
   /// 2. If `metadata/` directory is found in any context path → use its parent
-  /// 3. If `.novelsaga/cache/index` is found → migrate to canonical path
   /// 4. Use first available context path (CLI target, CLI cwd, show parent, LSP startup)
   ///
   /// # Returns
@@ -69,15 +64,6 @@ impl MetadataResolver {
       };
 
       loop {
-        // Check for legacy .novelsaga/cache/index at THIS level
-        let legacy_check = current.join(".novelsaga/cache/index");
-        if legacy_check.exists() {
-          if let Err(e) = Self::migrate_legacy_data(&current) {
-            eprintln!("[novelsaga] Warning: legacy migration failed: {e}");
-          }
-          return Ok(Self::canonical_path(&current));
-        }
-
         // Check for metadata/ marker at THIS level
         let metadata_dir = current.join("metadata");
         if metadata_dir.is_dir() {
@@ -102,57 +88,6 @@ impl MetadataResolver {
   /// `<workspace>/.cache/novelsaga/sled`
   pub fn canonical_path(workspace: &Path) -> PathBuf {
     workspace.join(".cache/novelsaga/sled")
-  }
-
-  /// Migrate legacy `.novelsaga/cache/index` data to canonical path.
-  ///
-  /// Migration only occurs when:
-  /// - Legacy path `.novelsaga/cache/index` exists
-  /// - Canonical path `.cache/novelsaga/sled` does NOT already exist
-  ///
-  /// # Errors
-  /// Returns `ResolverError::IoError` if filesystem operations fail.
-  pub fn migrate_legacy_data(workspace: &Path) -> Result<(), ResolverError> {
-    let legacy_path = workspace.join(".novelsaga/cache/index");
-    let canonical = Self::canonical_path(workspace);
-
-    // Only migrate when canonical doesn't exist but legacy does
-    if canonical.exists() {
-      eprintln!(
-        "[novelsaga] Canonical path already exists, skipping migration: {}",
-        canonical.display()
-      );
-      return Ok(());
-    }
-
-    if !legacy_path.exists() {
-      return Ok(());
-    }
-
-    eprintln!(
-      "[novelsaga] Migrating legacy metadata from {} to {}",
-      legacy_path.display(),
-      canonical.display()
-    );
-
-    // Create parent directories for canonical path
-    if let Some(parent) = canonical.parent() {
-      fs::create_dir_all(parent)
-        .map_err(|e| ResolverError::IoError(format!("Failed to create canonical directory: {e}")))?;
-    }
-
-    // Move (rename) legacy data to canonical location
-    fs::rename(&legacy_path, &canonical).map_err(|e| {
-      ResolverError::IoError(format!(
-        "Failed to migrate legacy data from {} to {}: {}",
-        legacy_path.display(),
-        canonical.display(),
-        e
-      ))
-    })?;
-
-    eprintln!("[novelsaga] Migration complete");
-    Ok(())
   }
 }
 
@@ -348,34 +283,6 @@ mod tests {
     let expected = workspace_root.join(".cache/novelsaga/sled");
 
     assert_eq!(resolved, expected, "Should recognize metadata/ as workspace marker");
-
-    Ok(())
-  }
-
-  #[test]
-  fn test_legacy_migration_detects_novelsaga_cache_index() -> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = TempDir::new()?;
-    let workspace_root = temp_dir.path().to_path_buf();
-
-    // Create legacy .novelsaga/cache/index path
-    fs::create_dir_all(workspace_root.join(".novelsaga/cache"))?;
-    fs::File::create(workspace_root.join(".novelsaga/cache/index"))?;
-
-    let context = ResolutionContext {
-      workspace_root: None,
-      cli_target_path: Some(workspace_root.clone()),
-      cli_cwd: None,
-      show_target_parent: None,
-      lsp_startup_dir: None,
-    };
-
-    let resolved = MetadataResolver::resolve(&context)?;
-    let expected = workspace_root.join(".cache/novelsaga/sled");
-
-    assert_eq!(
-      resolved, expected,
-      "Should detect and migrate legacy .novelsaga/cache/index"
-    );
 
     Ok(())
   }

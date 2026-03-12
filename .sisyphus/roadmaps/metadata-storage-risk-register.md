@@ -37,3 +37,14 @@ Pick one storage contract and enforce it end-to-end:
 2. **Dual-mode explicit**: project-local default + opt-in global mode, both clearly surfaced in logs/config.
 
 Until this is decided and implemented, metadata storage should be considered **partially migrated**.
+
+
+## Remediation Status (RESOLVED)
+
+All identified risks have been addressed through the unified storage contract remediation:
+
+- **R1, R2, R6 (Path Consistency)**: Resolved by implementing a shared `MetadataResolver` in `projects/cli/src/metadata/resolver.rs`. All modules (LSP backend, CLI index/list/show) now use the canonical `<workspace>/.cache/novelsaga/sled` path.
+- **R3 (Overstated Completion)**: Resolved by performing a cross-module audit and adding formal path-consistency verification to the integration test suite.
+- **R4 (Global Fallback)**: Resolved by removing implicit OS-global fallbacks. Storage is now strictly project-scoped to prevent cross-project contamination and silent data loss.
+- **R5 (Model Coupling)**: Resolved by unifying the entrypoint path logic, ensuring that entities indexed via CLI are identical to those visible in the LSP under the same workspace.
+- **Legacy Support**: Automatic migration from the old `.novelsaga/cache/index` location is implemented, ensuring no data loss for existing projects while transitioning to the new standard.

@@ -15,6 +15,7 @@ use sled::Db;
 #[allow(dead_code)]
 pub struct IndexManager {
   db: Db,
+  db_path: PathBuf,
   path_to_id: RwLock<HashMap<PathBuf, String>>,
 }
 
@@ -32,10 +33,16 @@ impl IndexManager {
     let db = sled::open(path)?;
     let manager = IndexManager {
       db,
+      db_path: path.to_path_buf(),
       path_to_id: RwLock::new(HashMap::new()),
     };
     manager.rebuild_path_to_id_index()?;
     Ok(manager)
+  }
+
+  #[must_use]
+  pub fn db_path(&self) -> &Path {
+    &self.db_path
   }
 
   /// Generates a unique 16-character ID from a source string using blake3 hash.
@@ -228,14 +235,37 @@ impl IndexManager {
     Ok(())
   }
 
+  /// Explicitly closes the sled database to release locks.
+  ///
+  /// This method consumes `self` to ensure the database is properly closed.
+  /// After calling this, the `IndexManager` can no longer be used.
+  ///
+  /// # Returns
+  /// * `Ok(())` on success
+  pub fn close(self) -> Result<(), sled::Error> {
+    // Flush to ensure all data is persisted before closing
+    let _ = self.db.flush()?;
+    // Drop self to close the database (sled::Db closes on drop)
+    drop(self);
+    Ok(())
+  }
+
   /// Lists all entities by scanning the entity: prefix.
   ///
   /// # Returns
   /// * `Ok(Vec<MetadataEntity>)` - Vector of all entities
   /// * `Err(sled::Error)` if database operation fails
   pub fn list_all(&self) -> Result<Vec<MetadataEntity>, sled::Error> {
-    let prefix = "entity:";
-    self.collect_entities_by_prefix(prefix)
+    let mut entities = Vec::new();
+
+    for item in self.db.scan_prefix(b"entity:") {
+      let (_key, bytes) = item?;
+      if let Ok(entity) = serde_json::from_slice::<MetadataEntity>(&bytes) {
+        entities.push(entity);
+      }
+    }
+
+    Ok(entities)
   }
 
   /// Helper function to collect entities from a prefix scan.

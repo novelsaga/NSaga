@@ -127,8 +127,7 @@ mod integration_tests {
       &test_config,
       r#"export default {
   workspace: {
-    cache_dir: ".novelsaga/cache",
-    novelsaga_dir: ".novelsaga"
+    cache_dir: ".cache/novelsaga"
   },
   fmt: {
     indent: 2,
