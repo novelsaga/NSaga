@@ -802,12 +802,11 @@ impl LanguageServer for Backend {
           .log_message(MessageType::INFO, "Executing novelsaga/list command")
           .await;
 
+        let workspace_root = { self.workspace_root.read().await.clone() };
         let context = ResolutionContext {
-          workspace_root: None,
+          workspace_root,
           cli_target_path: None,
-          cli_cwd: Some(std::env::current_dir().map_err(|error| {
-            to_internal_error(format!("Failed to get current directory for list command: {error}"))
-          })?),
+          cli_cwd: None,
           show_target_parent: None,
           lsp_startup_dir: None,
         };
