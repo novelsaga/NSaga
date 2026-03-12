@@ -20,4 +20,8 @@ pub async fn start() {
   tower_lsp::Server::new(stdin, stdout, socket).serve(service).await;
 
   eprintln!("LSP server finished");
+
+  // LSP exit notification received - exit cleanly
+  eprintln!("NovelSaga LSP Server exiting...");
+  std::process::exit(0);
 }

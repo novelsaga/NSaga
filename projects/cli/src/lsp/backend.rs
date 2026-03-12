@@ -97,6 +97,12 @@ impl Backend {
       .and_then(|uri| Self::document_path_from_url(uri).ok())
   }
 
+  fn workspace_root_from_file_uri(uri: &Url) -> Option<PathBuf> {
+    Self::document_path_from_url(uri)
+      .ok()
+      .and_then(|path| path.parent().map(Path::to_path_buf))
+  }
+
   fn workspace_watched_files_dynamic_registration(params: &InitializeParams) -> bool {
     params
       .capabilities
@@ -473,6 +479,22 @@ impl LanguageServer for Backend {
     let kind = Self::classify_document(&uri);
 
     eprintln!("Document opened: {uri}");
+
+    // Fallback chain: root_uri → workspaceFolders[0] → first file derivation → None
+    let should_initialize_workspace = {
+      let current_root = self.workspace_root.read().await;
+      current_root.is_none()
+    };
+
+    if should_initialize_workspace && let Some(derived_root) = Self::workspace_root_from_file_uri(&uri) {
+      eprintln!(
+        "Workspace root derived from first opened file: {}",
+        derived_root.display()
+      );
+      *self.workspace_root.write().await = Some(derived_root.clone());
+      // Initialize index_manager with newly derived workspace_root
+      *self.index_manager.write().await = Self::open_index_manager(Some(derived_root.as_path()));
+    }
 
     {
       let mut document_store = self.document_store.write().await;
