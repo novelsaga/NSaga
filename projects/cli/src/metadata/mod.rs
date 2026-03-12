@@ -1,6 +1,10 @@
 pub mod cache;
 /// Metadata system for managing document metadata entities
+/// Metadata system for managing document metadata entities
 pub mod index;
+pub mod resolver;
+#[allow(unused_imports)]
+pub use resolver::{MetadataResolver, ResolutionContext, ResolverError}; // TODO: integrate into CLI commands
 // pub mod watcher; // DEPRECATED: FileWatcher is superseded by LSP didChangeWatchedFiles in P3
 pub mod worker;
 
