@@ -1,467 +1,702 @@
 use std::{
-  collections::HashMap,
-  path::PathBuf,
+  path::{Path, PathBuf},
   process::{Command, Stdio},
+  sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+  },
 };
 
-use anyhow::{Context, Result};
-use lsp_types::{
-  ClientCapabilities, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-  DocumentFormattingParams, FormattingOptions, InitializeParams, TextDocumentContentChangeEvent,
-  TextDocumentIdentifier, TextDocumentItem, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-  notification::{DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument},
-  request::{Formatting, Initialize, Request, Shutdown},
-};
-use serde::Serialize;
-use serde_json::{Value, json};
+use anyhow::{Context, Result, anyhow, bail};
+use async_lsp_client::{LspServer, ServerMessage};
+use serde_json::Value;
 use tempfile::TempDir;
 use tokio::{
-  io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-  process::{Child, ChildStdin, ChildStdout, Command as TokioCommand},
-  runtime::Builder,
+  runtime::Runtime,
+  sync::mpsc::Receiver,
   time::{Duration, sleep},
 };
+use tower_lsp::{
+  jsonrpc::{self, ErrorCode},
+  lsp_types::{
+    ClientCapabilities, DidChangeTextDocumentParams, DidChangeWatchedFilesClientCapabilities,
+    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+    DynamicRegistrationClientCapabilities, FileChangeType, FileEvent, FormattingOptions, InitializeParams,
+    InitializeResult, OneOf, ServerInfo, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentSyncCapability, TextDocumentSyncClientCapabilities,
+    TextDocumentSyncKind, TextEdit, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    WorkspaceClientCapabilities,
+    notification::{DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument},
+    request::{Formatting, RegisterCapability, Request as LspRequest, WorkDoneProgressCreate, WorkspaceConfiguration},
+  },
+};
 
-struct JsonRpcLspClient {
-  child: Child,
-  stdin: ChildStdin,
-  stdout: BufReader<ChildStdout>,
-  next_id: i64,
+#[derive(serde::Deserialize, serde::Serialize)]
+struct ShutdownParams {}
+
+enum ShutdownRequest {}
+
+impl LspRequest for ShutdownRequest {
+  type Params = ShutdownParams;
+  type Result = ();
+
+  const METHOD: &'static str = "shutdown";
 }
 
-impl JsonRpcLspClient {
-  fn spawn(manifest_path: &str, cwd: &std::path::Path) -> Result<Self> {
-    let mut child = TokioCommand::new("cargo")
-      .args([
-        "run",
-        "--bin",
-        "novelsaga",
-        "--manifest-path",
-        manifest_path,
-        "--",
-        "lsp",
-      ])
-      .current_dir(cwd)
-      .stdin(Stdio::piped())
-      .stdout(Stdio::piped())
-      .kill_on_drop(true)
-      .spawn()
-      .context("Failed to spawn novelsaga lsp")?;
+#[cfg(not(windows))]
+use std::os::unix::fs::PermissionsExt;
 
-    let stdin = child.stdin.take().context("Failed to capture LSP child stdin")?;
-    let stdout = child.stdout.take().context("Failed to capture LSP child stdout")?;
+use crate::tasks::utils::{project_root, run_command, target_dir};
 
-    Ok(Self {
-      child,
-      stdin,
-      stdout: BufReader::new(stdout),
-      next_id: 1,
-    })
-  }
-
-  async fn send_notification<N>(&mut self, params: N::Params) -> Result<()>
-  where
-    N: lsp_types::notification::Notification,
-    N::Params: Serialize,
-  {
-    let payload = json!({
-      "jsonrpc": "2.0",
-      "method": N::METHOD,
-      "params": params,
-    });
-    self.write_message(&payload).await
-  }
-
-  async fn send_request<R>(&mut self, params: R::Params) -> Result<R::Result>
-  where
-    R: lsp_types::request::Request,
-    R::Params: Serialize,
-    R::Result: serde::de::DeserializeOwned,
-  {
-    let id = self.next_id;
-    self.next_id += 1;
-
-    let payload = json!({
-      "jsonrpc": "2.0",
-      "id": id,
-      "method": R::METHOD,
-      "params": params,
-    });
-
-    self.write_message(&payload).await?;
-    let response = self.read_response_for_id(id).await?;
-
-    match (response.result, response.error) {
-      (Some(result), None) => serde_json::from_value(result).context("Failed to deserialize JSON-RPC response result"),
-      (_, Some(error)) => Err(anyhow::anyhow!(
-        "JSON-RPC error response (code {}): {}",
-        error.code,
-        error.message
-      )),
-      (None, None) => Err(anyhow::anyhow!("JSON-RPC response missing both result and error")),
-    }
-  }
-
-  async fn send_request_raw<P>(&mut self, method: &str, params: P) -> Result<JsonRpcResponse>
-  where
-    P: Serialize,
-  {
-    let id = self.next_id;
-    self.next_id += 1;
-
-    let payload = json!({
-      "jsonrpc": "2.0",
-      "id": id,
-      "method": method,
-      "params": params,
-    });
-
-    self.write_message(&payload).await?;
-    self.read_response_for_id(id).await
-  }
-
-  async fn shutdown_and_wait(mut self) -> Result<()> {
-    let status = self.child.wait().await.context("Failed to wait for LSP process exit")?;
-    if !status.success() {
-      return Err(anyhow::anyhow!("LSP process exited with status: {status}"));
-    }
-    Ok(())
-  }
-
-  async fn write_message(&mut self, value: &Value) -> Result<()> {
-    let body = serde_json::to_vec(value).context("Failed to serialize JSON-RPC payload")?;
-    let header = format!("Content-Length: {}\r\n\r\n", body.len());
-    self
-      .stdin
-      .write_all(header.as_bytes())
-      .await
-      .context("Failed to write JSON-RPC header to LSP stdin")?;
-    self
-      .stdin
-      .write_all(&body)
-      .await
-      .context("Failed to write JSON-RPC body to LSP stdin")?;
-    self.stdin.flush().await.context("Failed to flush LSP stdin")?;
-    Ok(())
-  }
-
-  async fn read_response_for_id(&mut self, expected_id: i64) -> Result<JsonRpcResponse> {
-    loop {
-      let raw = self.read_message().await?;
-      let value: Value = serde_json::from_slice(&raw).context("Failed to parse JSON-RPC payload")?;
-
-      if value.get("id").is_some() {
-        let response: JsonRpcResponse = serde_json::from_value(value).context("Failed to parse JSON-RPC response")?;
-        match response.id {
-          Some(JsonRpcId::Number(id)) if id == expected_id => return Ok(response),
-          _ => continue,
-        }
-      }
-    }
-  }
-
-  async fn read_message(&mut self) -> Result<Vec<u8>> {
-    let mut headers = HashMap::new();
-    loop {
-      let mut line = String::new();
-      let read = self
-        .stdout
-        .read_line(&mut line)
-        .await
-        .context("Failed to read JSON-RPC header line")?;
-
-      if read == 0 {
-        return Err(anyhow::anyhow!("LSP stdout closed while reading JSON-RPC headers"));
-      }
-
-      if line == "\r\n" {
-        break;
-      }
-
-      let line = line.trim_end();
-      let (key, value) = line
-        .split_once(':')
-        .ok_or_else(|| anyhow::anyhow!("Invalid JSON-RPC header line: {line}"))?;
-      headers.insert(key.to_ascii_lowercase(), value.trim().to_string());
-    }
-
-    let content_length = headers
-      .get("content-length")
-      .ok_or_else(|| anyhow::anyhow!("Missing Content-Length header in JSON-RPC message"))?
-      .parse::<usize>()
-      .context("Invalid Content-Length header value")?;
-
-    let mut body = vec![0u8; content_length];
-    self
-      .stdout
-      .read_exact(&mut body)
-      .await
-      .context("Failed to read JSON-RPC message body")?;
-    Ok(body)
-  }
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(untagged)]
-enum JsonRpcId {
-  Number(i64),
-  String(()),
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct JsonRpcError {
-  code: i64,
-  message: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct JsonRpcResponse {
-  id: Option<JsonRpcId>,
-  result: Option<Value>,
-  error: Option<JsonRpcError>,
-}
+#[cfg(windows)]
+const NOVELSAGA_BINARY_NAME: &str = "novelsaga.exe";
+#[cfg(not(windows))]
+const NOVELSAGA_BINARY_NAME: &str = "novelsaga";
 
 pub fn run_e2e_test() -> Result<()> {
-  let runtime = Builder::new_multi_thread()
-    .enable_all()
-    .build()
-    .context("Failed to create tokio runtime for LSP E2E test")?;
+  ensure_lsp_test_prerequisites()?;
+  let binary = novelsaga_binary_path()?;
+  let runtime = build_runtime()?;
 
-  runtime.block_on(run_lsp_e2e_test())
+  println!("🧪 Running LSP E2E tests...\n");
+
+  runtime.block_on(async {
+    run_lsp_e2e_test_impl(&binary).await?;
+    run_lsp_didchangewatchedfiles_e2e_test_impl(&binary).await?;
+    Ok::<(), anyhow::Error>(())
+  })?;
+
+  println!("\n✅ All LSP E2E tests passed");
+  Ok(())
 }
 
-pub async fn run_lsp_e2e_test() -> Result<()> {
-  println!("🧪 Running LSP E2E test...");
+async fn run_lsp_e2e_test_impl(binary: &Path) -> Result<()> {
+  println!("• run_lsp_e2e_test");
 
-  let temp_dir = TempDir::new().context("Failed to create temp workspace")?;
-  let test_file = temp_dir.path().join("test.md");
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let article_path = workspace.path().join("article.md");
+  let original_text = "你好world\n\n第二段test";
+  let changed_text = "修改后abc\n\n第三段xyz";
 
-  let original_content = "---\ntitle: Test\n---\n\nContent";
-  std::fs::write(&test_file, original_content).context("Failed to create LSP test markdown file")?;
+  std::fs::write(&article_path, original_text).context("Failed to write initial article.md")?;
 
-  let workspace_root = get_workspace_root()?;
-  let manifest_path = workspace_root.join("projects/cli/Cargo.toml");
+  let (server, initialize_result, _, pid_file) = start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
 
-  let manifest_path_str = manifest_path
-    .to_str()
-    .context("CLI manifest path contains invalid UTF-8")?;
+  let article_uri = file_url(&article_path)?;
 
-  let mut preflight_child = TokioCommand::new("cargo")
-    .args([
-      "run",
-      "--bin",
-      "novelsaga",
-      "--manifest-path",
-      manifest_path_str,
-      "--",
-      "lsp",
-    ])
-    .current_dir(temp_dir.path())
-    .stdin(Stdio::piped())
-    .stdout(Stdio::piped())
-    .kill_on_drop(true)
-    .spawn()
-    .context("Failed to spawn novelsaga lsp with tokio::process::Command")?;
-
-  let _preflight_stdin = preflight_child
-    .stdin
-    .take()
-    .context("Failed to capture preflight LSP stdin")?;
-  let _preflight_stdout = preflight_child
-    .stdout
-    .take()
-    .context("Failed to capture preflight LSP stdout")?;
-
-  sleep(Duration::from_millis(150)).await;
-  preflight_child
-    .kill()
-    .await
-    .context("Failed to terminate preflight LSP process")?;
-  let _ = preflight_child.wait().await;
-
-  let mut client = JsonRpcLspClient::spawn(manifest_path_str, temp_dir.path())?;
-
-  let root_uri = Url::from_file_path(temp_dir.path())
-    .map_err(|_| anyhow::anyhow!("Failed to convert workspace path to file URL"))?;
-
-  let initialize_result = client
-    .send_request::<Initialize>(InitializeParams {
-      process_id: Some(std::process::id()),
-      root_uri: Some(root_uri),
-      capabilities: ClientCapabilities::default(),
-      ..Default::default()
-    })
-    .await
-    .context("initialize request failed")?;
-
-  if initialize_result.capabilities.text_document_sync.is_none() {
-    anyhow::bail!("initialize response missing textDocumentSync capability");
-  }
-
-  client
-    .send_notification::<lsp_types::notification::Initialized>(lsp_types::InitializedParams {})
-    .await
-    .context("initialized notification failed")?;
-
-  let file_uri =
-    Url::from_file_path(&test_file).map_err(|_| anyhow::anyhow!("Failed to convert test file path to file URL"))?;
-
-  client
+  server
     .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
       text_document: TextDocumentItem {
-        uri: file_uri.clone(),
+        uri: article_uri.clone(),
         language_id: "markdown".to_string(),
         version: 1,
-        text: original_content.to_string(),
+        text: original_text.to_string(),
       },
     })
-    .await
-    .context("didOpen notification failed")?;
+    .await;
 
-  let changed_content = "---\ntitle: Updated\n---\n\nChanged content";
+  let open_edit = expect_single_edit(
+    request_formatting(&server, article_uri.clone()).await?,
+    "formatting after didOpen",
+  )?;
+  assert_eq!(
+    open_edit.new_text, "    你好 world\n\n    第二段 test",
+    "didOpen formatting should use opened document contents"
+  );
 
-  let formatting_after_open = client
-    .send_request::<Formatting>(DocumentFormattingParams {
-      text_document: TextDocumentIdentifier { uri: file_uri.clone() },
-      options: FormattingOptions {
-        tab_size: 2,
-        insert_spaces: true,
-        properties: HashMap::new(),
-        trim_trailing_whitespace: Some(true),
-        insert_final_newline: Some(true),
-        trim_final_newlines: Some(true),
-      },
-      work_done_progress_params: WorkDoneProgressParams { work_done_token: None },
-    })
-    .await
-    .context("formatting request after didOpen failed")?;
-
-  if formatting_after_open.is_none() {
-    anyhow::bail!("formatting response after didOpen was None; expected server to load opened document");
-  }
-
-  client
+  server
     .send_notification::<DidChangeTextDocument>(DidChangeTextDocumentParams {
       text_document: VersionedTextDocumentIdentifier {
-        uri: file_uri.clone(),
+        uri: article_uri.clone(),
         version: 2,
       },
       content_changes: vec![TextDocumentContentChangeEvent {
         range: None,
         range_length: None,
-        text: changed_content.to_string(),
+        text: changed_text.to_string(),
       }],
     })
-    .await
-    .context("didChange notification failed")?;
+    .await;
 
-  let formatting_after_change = client
+  let changed_edit = expect_single_edit(
+    request_formatting(&server, article_uri.clone()).await?,
+    "formatting after didChange",
+  )?;
+  assert_eq!(
+    changed_edit.new_text, "    修改后 abc\n\n    第三段 xyz",
+    "didChange formatting should reflect updated in-memory contents"
+  );
+
+  server
+    .send_notification::<DidCloseTextDocument>(DidCloseTextDocumentParams {
+      text_document: TextDocumentIdentifier {
+        uri: article_uri.clone(),
+      },
+    })
+    .await;
+
+  let after_close = request_formatting(&server, article_uri).await?;
+  if after_close.is_some() {
+    bail!("formatting after didClose should return None");
+  }
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ core LSP operations passed");
+  Ok(())
+}
+
+async fn run_lsp_didchangewatchedfiles_e2e_test_impl(binary: &Path) -> Result<()> {
+  println!("• run_lsp_didchangewatchedfiles_e2e_test");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let metadata_dir = workspace.path().join("book").join("metadata");
+  std::fs::create_dir_all(&metadata_dir).context("Failed to create metadata directory")?;
+
+  let watched1 = metadata_dir.join("characters").join("watched1.md");
+  let watched2 = metadata_dir.join("characters").join("watched2.md");
+  let watched3 = metadata_dir.join("characters").join("watched3.md");
+  std::fs::create_dir_all(watched1.parent().context("Missing watched parent")?)
+    .context("Failed to create watched metadata parent directory")?;
+  let index_dir = expected_index_dir_for_workspace(workspace.path());
+
+  let (server, _, watched_registration_ready, pid_file) = start_server(binary, workspace.path()).await?;
+  wait_for_watched_registration(&watched_registration_ready, 5).await?;
+
+  std::fs::write(&watched1, "---\ntitle: Watched File 1\n---\n\nbody").context("Failed to write watched1.md")?;
+  notify_watched_files(&server, vec![file_event(&watched1, FileChangeType::CREATED)?]).await?;
+  sleep(Duration::from_millis(150)).await;
+
+  std::fs::write(&watched1, "---\ntitle: Watched File 1 Updated\n---\n\nbody")
+    .context("Failed to update watched1.md")?;
+  notify_watched_files(&server, vec![file_event(&watched1, FileChangeType::CHANGED)?]).await?;
+  sleep(Duration::from_millis(150)).await;
+
+  std::fs::write(&watched2, "---\ntitle: Watched File 2\n---\n\nbody").context("Failed to write watched2.md")?;
+  std::fs::write(&watched3, "---\ntitle: Watched File 3\n---\n\nbody").context("Failed to write watched3.md")?;
+  notify_watched_files(
+    &server,
+    vec![
+      file_event(&watched2, FileChangeType::CREATED)?,
+      file_event(&watched3, FileChangeType::CREATED)?,
+    ],
+  )
+  .await?;
+  sleep(Duration::from_millis(150)).await;
+
+  std::fs::remove_file(&watched3).context("Failed to delete watched3.md")?;
+  notify_watched_files(&server, vec![file_event(&watched3, FileChangeType::DELETED)?]).await?;
+  sleep(Duration::from_millis(150)).await;
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+
+  wait_for_path(&index_dir).await?;
+  if !wait_for_index_state(
+    &index_dir,
+    |db| {
+      let Some(bytes1) = db.get(b"entity:watched1")? else {
+        return Ok(false);
+      };
+      let entity1: Value = serde_json::from_slice(&bytes1).context("Failed to deserialize watched1 entity JSON")?;
+      let watched1_updated = entity1
+        .get("frontmatter")
+        .and_then(|frontmatter| frontmatter.get("title"))
+        .and_then(Value::as_str)
+        == Some("Watched File 1 Updated");
+
+      let watched2_exists = db.get(b"entity:watched2")?.is_some();
+      let watched3_removed = db.get(b"entity:watched3")?.is_none();
+
+      Ok(watched1_updated && watched2_exists && watched3_removed)
+    },
+    5,
+  )
+  .await?
+  {
+    let snapshot =
+      read_index_snapshot(&index_dir).unwrap_or_else(|error| format!("<failed to read index snapshot: {error:#}>"));
+    bail!("Timed out waiting for watched files index state after notifications. Snapshot: {snapshot}");
+  }
+
+  assert_index_title(&index_dir, "watched1", "Watched File 1 Updated")?;
+  assert_index_title(&index_dir, "watched2", "Watched File 2")?;
+
+  if read_index_entity(&index_dir, "watched3")?.is_some() {
+    bail!("watched3 should have been removed from metadata index after delete event");
+  }
+
+  println!("  ✅ watched files protocol passed");
+  Ok(())
+}
+
+fn build_runtime() -> Result<Runtime> {
+  tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .context("Failed to create tokio runtime for LSP E2E tests")
+}
+
+fn ensure_lsp_test_prerequisites() -> Result<()> {
+  println!("🔧 Building JS bridge assets for LSP E2E...");
+  crate::tasks::build::build_all()?;
+
+  println!("🔨 Building novelsaga-cli...");
+  let mut command = Command::new("cargo");
+  command
+    .args(["build", "-p", "novelsaga-cli"])
+    .current_dir(project_root());
+  run_command(&mut command).context("Failed to build novelsaga-cli for LSP E2E tests")
+}
+
+fn novelsaga_binary_path() -> Result<PathBuf> {
+  let binary = target_dir().join("debug").join(NOVELSAGA_BINARY_NAME);
+  if !binary.exists() {
+    bail!("novelsaga binary not found at {}", binary.display());
+  }
+  Ok(binary)
+}
+
+fn expected_index_dir_for_workspace(workspace_root: &Path) -> PathBuf {
+  workspace_root.join(".novelsaga").join("cache").join("index")
+}
+
+async fn start_server(
+  binary: &Path,
+  workspace_root: &Path,
+) -> Result<(LspServer, InitializeResult, Arc<AtomicBool>, Option<PathBuf>)> {
+  let (program, args, pid_file) = lsp_launch_command(binary, workspace_root)?;
+  let (server, rx) = LspServer::new(program, args);
+  let watched_registration_ready = Arc::new(AtomicBool::new(false));
+
+  tokio::spawn(drive_server_messages(
+    server.clone(),
+    rx,
+    watched_registration_ready.clone(),
+  ));
+
+  let initialize_result = server
+    .initialize(initialize_params(workspace_root)?)
+    .await
+    .map_err(|error| jsonrpc_error("initialize request failed", error))?;
+
+  server.initialized().await;
+  Ok((server, initialize_result, watched_registration_ready, pid_file))
+}
+
+async fn drive_server_messages(
+  server: LspServer,
+  mut rx: Receiver<ServerMessage>,
+  watched_registration_ready: Arc<AtomicBool>,
+) {
+  while let Some(message) = rx.recv().await {
+    match message {
+      ServerMessage::Notification(_) => {}
+      ServerMessage::Request(request) => {
+        let Some(id) = request.id().cloned() else {
+          continue;
+        };
+
+        match request.method() {
+          <RegisterCapability as LspRequest>::METHOD => {
+            watched_registration_ready.store(true, Ordering::Release);
+            server.send_response::<RegisterCapability>(id, ()).await;
+          }
+          <WorkspaceConfiguration as LspRequest>::METHOD => {
+            server
+              .send_response::<WorkspaceConfiguration>(id, Vec::<Value>::new())
+              .await;
+          }
+          <WorkDoneProgressCreate as LspRequest>::METHOD => {
+            server.send_response::<WorkDoneProgressCreate>(id, ()).await;
+          }
+          _ => {
+            server
+              .send_error_response(
+                id,
+                jsonrpc::Error {
+                  code: ErrorCode::MethodNotFound,
+                  message: "Method Not Found".into(),
+                  data: request.params().cloned(),
+                },
+              )
+              .await;
+          }
+        }
+      }
+    }
+  }
+}
+
+async fn wait_for_watched_registration(flag: &AtomicBool, timeout_secs: u64) -> Result<()> {
+  let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+  while std::time::Instant::now() < deadline {
+    if flag.load(Ordering::Acquire) {
+      return Ok(());
+    }
+    sleep(Duration::from_millis(50)).await;
+  }
+
+  bail!("Timed out waiting for watched-files dynamic registration")
+}
+
+fn lsp_launch_command(binary: &Path, workspace_root: &Path) -> Result<(String, Vec<String>, Option<PathBuf>)> {
+  #[cfg(not(windows))]
+  {
+    let helper_dir = workspace_root.join(".novelsaga");
+    std::fs::create_dir_all(&helper_dir).context("Failed to create helper directory for LSP launch")?;
+
+    let pid_file = helper_dir.join("lsp-e2e.pid");
+    let wrapper = helper_dir.join("lsp-e2e-launch.sh");
+    let script = format!(
+      "#!/usr/bin/env bash\nset -euo pipefail\necho $$ > \"{}\"\nexec \"{}\" lsp\n",
+      pid_file.display(),
+      binary.display()
+    );
+    std::fs::write(&wrapper, script).context("Failed to write LSP launch wrapper")?;
+
+    let mut permissions = std::fs::metadata(&wrapper)
+      .context("Failed to stat LSP launch wrapper")?
+      .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&wrapper, permissions).context("Failed to chmod LSP launch wrapper")?;
+
+    let program = wrapper.to_string_lossy().into_owned();
+    Ok((program, Vec::new(), Some(pid_file)))
+  }
+
+  #[cfg(windows)]
+  {
+    let program = binary.to_string_lossy().into_owned();
+    Ok((program, vec!["lsp".to_string()], None))
+  }
+}
+
+#[allow(deprecated)]
+fn initialize_params(workspace_root: &Path) -> Result<InitializeParams> {
+  Ok(InitializeParams {
+    process_id: Some(std::process::id()),
+    root_path: None,
+    root_uri: Some(file_url(workspace_root)?),
+    initialization_options: None,
+    capabilities: client_capabilities(),
+    trace: None,
+    workspace_folders: None,
+    client_info: None,
+    locale: None,
+  })
+}
+
+fn client_capabilities() -> ClientCapabilities {
+  ClientCapabilities {
+    workspace: Some(WorkspaceClientCapabilities {
+      configuration: Some(true),
+      did_change_watched_files: Some(DidChangeWatchedFilesClientCapabilities {
+        dynamic_registration: Some(true),
+        relative_pattern_support: Some(true),
+      }),
+      ..Default::default()
+    }),
+    text_document: Some(TextDocumentClientCapabilities {
+      synchronization: Some(TextDocumentSyncClientCapabilities {
+        dynamic_registration: Some(true),
+        ..Default::default()
+      }),
+      formatting: Some(DynamicRegistrationClientCapabilities {
+        dynamic_registration: Some(true),
+      }),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
+fn assert_core_capabilities(result: &InitializeResult) -> Result<()> {
+  match result.capabilities.text_document_sync {
+    Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)) => {}
+    ref other => bail!("expected FULL textDocumentSync, got {other:?}"),
+  }
+
+  match result.capabilities.document_formatting_provider {
+    Some(OneOf::Left(true)) => {}
+    ref other => bail!("expected document formatting provider enabled, got {other:?}"),
+  }
+
+  match &result.server_info {
+    Some(ServerInfo { name, .. }) if name.contains("NovelSaga") => {}
+    other => bail!("expected NovelSaga server_info, got {other:?}"),
+  }
+
+  Ok(())
+}
+
+async fn request_formatting(server: &LspServer, uri: Url) -> Result<Option<Vec<TextEdit>>> {
+  server
     .send_request::<Formatting>(DocumentFormattingParams {
-      text_document: TextDocumentIdentifier { uri: file_uri.clone() },
+      text_document: TextDocumentIdentifier { uri },
       options: FormattingOptions {
         tab_size: 2,
         insert_spaces: true,
-        properties: HashMap::new(),
+        properties: Default::default(),
         trim_trailing_whitespace: Some(true),
         insert_final_newline: Some(true),
         trim_final_newlines: Some(true),
       },
-      work_done_progress_params: WorkDoneProgressParams { work_done_token: None },
+      work_done_progress_params: WorkDoneProgressParams::default(),
     })
     .await
-    .context("formatting request after didChange failed")?;
+    .map_err(|error| jsonrpc_error("formatting request failed", error))
+}
 
-  if let Some(edits) = formatting_after_change {
-    let edits_json = serde_json::to_string(&edits).context("Failed to serialize formatting edits")?;
-    if !edits_json.contains("Updated") {
-      anyhow::bail!("formatting response after didChange does not reflect updated title; edits={edits_json}");
-    }
+fn expect_single_edit(edits: Option<Vec<TextEdit>>, context: &str) -> Result<TextEdit> {
+  let mut edits = edits.ok_or_else(|| anyhow!("{context}: server returned no edits"))?;
+  if edits.len() != 1 {
+    bail!("{context}: expected exactly one TextEdit, got {}", edits.len());
   }
+  Ok(edits.remove(0))
+}
 
-  client
-    .send_notification::<DidCloseTextDocument>(DidCloseTextDocumentParams {
-      text_document: TextDocumentIdentifier { uri: file_uri.clone() },
-    })
-    .await
-    .context("didClose notification failed")?;
-
-  let formatting_after_close = client
-    .send_request_raw(
-      Formatting::METHOD,
-      DocumentFormattingParams {
-        text_document: TextDocumentIdentifier { uri: file_uri.clone() },
-        options: FormattingOptions {
-          tab_size: 2,
-          insert_spaces: true,
-          properties: HashMap::new(),
-          trim_trailing_whitespace: Some(true),
-          insert_final_newline: Some(true),
-          trim_final_newlines: Some(true),
-        },
-        work_done_progress_params: WorkDoneProgressParams { work_done_token: None },
-      },
-    )
-    .await
-    .context("formatting request after didClose failed")?;
-
-  if formatting_after_close.error.is_none() {
-    println!("⚠️  Warning: formatting after didClose succeeded; server may not have cleared document state");
-  } else {
-    println!("✅ Server correctly rejected formatting after didClose");
-  }
-
-  let invalid_shutdown_response = client
-    .send_request_raw(Shutdown::METHOD, json!({ "unexpected": true }))
-    .await
-    .context("shutdown request with invalid params failed")?;
-
-  let invalid_shutdown_error = invalid_shutdown_response
-    .error
-    .ok_or_else(|| anyhow::anyhow!("shutdown with invalid params unexpectedly succeeded"))?;
-
-  if invalid_shutdown_error.code != -32602 {
-    anyhow::bail!(
-      "shutdown with invalid params returned unexpected error code {}; expected -32602",
-      invalid_shutdown_error.code
-    );
-  }
-
-  if !invalid_shutdown_error.message.contains("Invalid params") {
-    anyhow::bail!(
-      "shutdown with invalid params returned unexpected error message: {}",
-      invalid_shutdown_error.message
-    );
-  }
-
-  client
-    .send_request::<Shutdown>(())
-    .await
-    .context("shutdown request failed")?;
-  client
-    .send_notification::<lsp_types::notification::Exit>(())
-    .await
-    .context("exit notification failed")?;
-  client.shutdown_and_wait().await?;
-
-  println!("✅ LSP E2E test passed");
+async fn notify_watched_files(server: &LspServer, changes: Vec<FileEvent>) -> Result<()> {
+  server
+    .send_notification::<DidChangeWatchedFiles>(DidChangeWatchedFilesParams { changes })
+    .await;
   Ok(())
 }
 
-fn get_workspace_root() -> Result<PathBuf> {
-  let output = Command::new("cargo")
-    .args(["locate-project", "--workspace", "--message-format=plain"])
-    .output()
-    .context("Failed to locate workspace root")?;
+fn file_event(path: &Path, typ: FileChangeType) -> Result<FileEvent> {
+  Ok(FileEvent::new(file_url(path)?, typ))
+}
 
-  if !output.status.success() {
-    anyhow::bail!("cargo locate-project failed");
+async fn shutdown_server(server: &LspServer, pid_file: Option<&Path>) -> Result<()> {
+  let shutdown_rejected = match server.send_request::<ShutdownRequest>(ShutdownParams {}).await {
+    Ok(()) => false,
+    Err(error) if error.code == ErrorCode::InvalidParams => true,
+    Err(_) => true,
+  };
+
+  if shutdown_rejected {
+    let _ = server.shutdown().await;
   }
 
-  let cargo_toml = String::from_utf8(output.stdout).context("Workspace path is not valid UTF-8")?;
-  let cargo_toml = cargo_toml.trim();
-  let parent = std::path::Path::new(cargo_toml)
-    .parent()
-    .context("Failed to get workspace root from Cargo.toml path")?;
+  server.exit().await;
+  sleep(Duration::from_millis(200)).await;
 
-  Ok(parent.to_path_buf())
+  if let Some(pid_file) = pid_file {
+    wait_for_lsp_process_exit(pid_file)?;
+  }
+
+  Ok(())
+}
+
+fn wait_for_lsp_process_exit(pid_file: &Path) -> Result<()> {
+  if !pid_file.exists() {
+    return Ok(());
+  }
+
+  #[cfg(not(windows))]
+  {
+    let pid = std::fs::read_to_string(pid_file)
+      .context("Failed to read LSP pid file")?
+      .trim()
+      .parse::<i32>()
+      .context("Failed to parse LSP pid")?;
+
+    for _ in 0..20 {
+      if !is_process_alive(pid) {
+        let _ = std::fs::remove_file(pid_file);
+        return Ok(());
+      }
+      std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    let _ = Command::new("kill")
+      .args(["-TERM", &pid.to_string()])
+      .stdout(Stdio::null())
+      .stderr(Stdio::null())
+      .status();
+
+    for _ in 0..20 {
+      if !is_process_alive(pid) {
+        let _ = std::fs::remove_file(pid_file);
+        return Ok(());
+      }
+      std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    let _ = Command::new("kill")
+      .args(["-KILL", &pid.to_string()])
+      .stdout(Stdio::null())
+      .stderr(Stdio::null())
+      .status();
+
+    for _ in 0..20 {
+      if !is_process_alive(pid) {
+        let _ = std::fs::remove_file(pid_file);
+        return Ok(());
+      }
+      std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    bail!("LSP process {pid} did not exit after shutdown/exit/TERM/KILL")
+  }
+
+  #[cfg(windows)]
+  {
+    let _ = std::fs::remove_file(pid_file);
+    Ok(())
+  }
+}
+
+#[cfg(not(windows))]
+fn is_process_alive(pid: i32) -> bool {
+  #[cfg(target_os = "linux")]
+  {
+    if is_process_zombie(pid) {
+      return false;
+    }
+  }
+
+  Command::new("kill")
+    .args(["-0", &pid.to_string()])
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .status()
+    .map(|status| status.success())
+    .unwrap_or(false)
+}
+
+#[cfg(all(not(windows), target_os = "linux"))]
+fn is_process_zombie(pid: i32) -> bool {
+  let stat_path = format!("/proc/{pid}/stat");
+  let Ok(stat) = std::fs::read_to_string(stat_path) else {
+    return false;
+  };
+
+  stat
+    .split_whitespace()
+    .nth(2)
+    .map(|state| state == "Z")
+    .unwrap_or(false)
+}
+
+fn read_index_entity(index_dir: &Path, entity_id: &str) -> Result<Option<Value>> {
+  let db = open_index_db_retry(index_dir, 50)?;
+  let key = format!("entity:{entity_id}");
+  let value = db
+    .get(key.as_bytes())
+    .with_context(|| format!("Failed to read entity {entity_id} from sled"))?;
+
+  value
+    .map(|bytes| serde_json::from_slice::<Value>(&bytes).context("Failed to deserialize metadata entity JSON"))
+    .transpose()
+}
+
+fn assert_index_title(index_dir: &Path, entity_id: &str, expected_title: &str) -> Result<()> {
+  let entity = read_index_entity(index_dir, entity_id)?
+    .ok_or_else(|| anyhow!("Indexed entity {entity_id} was not found in {}", index_dir.display()))?;
+
+  let actual_title = entity
+    .get("frontmatter")
+    .and_then(|frontmatter| frontmatter.get("title"))
+    .and_then(Value::as_str)
+    .ok_or_else(|| anyhow!("Entity {entity_id} does not contain frontmatter.title"))?;
+
+  if actual_title != expected_title {
+    bail!("Entity {entity_id} title mismatch: expected {expected_title:?}, got {actual_title:?}");
+  }
+
+  Ok(())
+}
+
+fn read_index_snapshot(index_dir: &Path) -> Result<String> {
+  let db = open_index_db_retry(index_dir, 5)?;
+  let mut entries = Vec::new();
+  for item in db.scan_prefix(b"entity:") {
+    let (key, value) = item.context("Failed to scan entity entries")?;
+    let key = String::from_utf8(key.to_vec()).context("Invalid UTF-8 entity key")?;
+    let entity: Value = serde_json::from_slice(&value).context("Failed to deserialize entity in snapshot")?;
+    let title = entity
+      .get("frontmatter")
+      .and_then(|frontmatter| frontmatter.get("title"))
+      .and_then(Value::as_str)
+      .unwrap_or("<none>");
+    entries.push(format!("{key}={title}"));
+  }
+
+  if entries.is_empty() {
+    Ok("<empty>".to_string())
+  } else {
+    entries.sort();
+    Ok(entries.join(", "))
+  }
+}
+
+async fn wait_for_path(path: &Path) -> Result<()> {
+  for _ in 0..20 {
+    if path.exists() {
+      return Ok(());
+    }
+    sleep(Duration::from_millis(100)).await;
+  }
+
+  bail!("Timed out waiting for path {}", path.display())
+}
+
+async fn wait_for_index_state<F>(index_dir: &Path, predicate: F, timeout_secs: u64) -> Result<bool>
+where
+  F: Fn(&sled::Db) -> Result<bool>,
+{
+  let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+
+  loop {
+    let db = match open_index_db_retry(index_dir, 1) {
+      Ok(db) => db,
+      Err(_) => {
+        if std::time::Instant::now() >= deadline {
+          return Ok(false);
+        }
+        sleep(Duration::from_millis(100)).await;
+        continue;
+      }
+    };
+    if predicate(&db)? {
+      return Ok(true);
+    }
+
+    if std::time::Instant::now() >= deadline {
+      return Ok(false);
+    }
+
+    sleep(Duration::from_millis(100)).await;
+  }
+}
+
+fn open_index_db_retry(index_dir: &Path, max_retries: usize) -> Result<sled::Db> {
+  let mut attempt = 0usize;
+  loop {
+    match sled::open(index_dir) {
+      Ok(db) => return Ok(db),
+      Err(sled::Error::Io(error)) if error.kind() == std::io::ErrorKind::WouldBlock && attempt < max_retries => {
+        attempt += 1;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+      }
+      Err(error) => {
+        return Err(error).with_context(|| format!("Failed to open sled index at {}", index_dir.display()));
+      }
+    }
+  }
+}
+
+fn file_url(path: &Path) -> Result<Url> {
+  Url::from_file_path(path).map_err(|_| anyhow!("Failed to convert path to file URL: {}", path.display()))
+}
+
+fn jsonrpc_error(context: &str, error: jsonrpc::Error) -> anyhow::Error {
+  anyhow!(
+    "{context}: code={:?}, message={}, data={:?}",
+    error.code,
+    error.message,
+    error.data
+  )
 }

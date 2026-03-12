@@ -9,10 +9,11 @@
   async-lsp-client = "0.2.3"
   clap             = { version = "4.5", features = ["derive"] }
   diplomat-tool    = "0.14.0"
-  lsp-types        = "0.94"
   serde            = { version = "1.0", features = ["derive"] }
   serde_json       = "1.0"
+  sled             = "0.34"
   tempfile         = "3.24.0"
   tokio            = { version = "1", features = ["full"] }
   toml             = "0.9"
+  tower-lsp        = "0.20"
   which            = "8.0"
