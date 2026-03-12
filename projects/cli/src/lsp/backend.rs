@@ -4,13 +4,15 @@ use std::{
   sync::Arc,
 };
 
-use directories::ProjectDirs;
 use novelsaga_core::{
   article::{Article, ArticleDocument},
   config::OverridableConfig,
   document::{DocumentKind, MarkdownParts, WorkspaceDocument},
   library,
-  metadata::MetadataEntity,
+  metadata::{
+    MetadataEntity,
+    parser::{generate_namespace, resolve_type},
+  },
   state::init::Initializer,
 };
 use tokio::sync::RwLock;
@@ -28,8 +30,12 @@ use tower_lsp::{
   },
 };
 use uuid::Uuid;
+use walkdir::WalkDir;
 
-use crate::metadata::IndexManager;
+use crate::metadata::{
+  IndexManager,
+  resolver::{MetadataResolver, ResolutionContext},
+};
 
 type DocumentStore = Arc<RwLock<HashMap<Url, DocumentState>>>;
 type SharedIndexManager = Arc<RwLock<Option<Arc<IndexManager>>>>;
@@ -113,21 +119,16 @@ impl Backend {
       .unwrap_or(false)
   }
 
-  fn determine_index_path(workspace_root: Option<&Path>) -> Option<PathBuf> {
-    if let Some(root) = workspace_root {
-      let path = root.join(".novelsaga").join("cache").join("index");
-      std::fs::create_dir_all(&path).ok()?;
-      return Some(path);
-    }
+  fn open_index_manager(workspace_root: Option<&Path>, lsp_startup_dir: Option<&Path>) -> Option<Arc<IndexManager>> {
+    let context = ResolutionContext {
+      workspace_root: workspace_root.map(std::path::Path::to_path_buf),
+      cli_target_path: None,
+      cli_cwd: None,
+      show_target_parent: None,
+      lsp_startup_dir: lsp_startup_dir.map(std::path::Path::to_path_buf),
+    };
 
-    let dirs = ProjectDirs::from("rs", "novelsaga", "novelsaga")?;
-    let path = dirs.cache_dir().join("metadata");
-    std::fs::create_dir_all(&path).ok()?;
-    Some(path)
-  }
-
-  fn open_index_manager(workspace_root: Option<&Path>) -> Option<Arc<IndexManager>> {
-    let index_path = Self::determine_index_path(workspace_root)?;
+    let index_path = MetadataResolver::resolve(&context).ok()?;
     match IndexManager::open(&index_path) {
       Ok(manager) => Some(Arc::new(manager)),
       Err(error) => {
@@ -392,6 +393,7 @@ impl Backend {
 }
 
 #[tower_lsp::async_trait]
+#[allow(clippy::too_many_lines)]
 impl LanguageServer for Backend {
   async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
     eprintln!("NovelSaga LSP Server initializing...");
@@ -403,8 +405,11 @@ impl LanguageServer for Backend {
       eprintln!("Workspace root: <none>");
     }
 
-    *self.workspace_root.write().await = workspace_root;
-    *self.index_manager.write().await = Self::open_index_manager(self.workspace_root.read().await.as_deref());
+    *self.workspace_root.write().await = workspace_root.clone();
+    let lsp_startup_dir = workspace_root.as_deref();
+    *self.index_manager.write().await =
+      Self::open_index_manager(self.workspace_root.read().await.as_deref(), lsp_startup_dir);
+
     *self.watched_files_dynamic_registration.write().await =
       Self::workspace_watched_files_dynamic_registration(&params);
 
@@ -493,7 +498,8 @@ impl LanguageServer for Backend {
       );
       *self.workspace_root.write().await = Some(derived_root.clone());
       // Initialize index_manager with newly derived workspace_root
-      *self.index_manager.write().await = Self::open_index_manager(Some(derived_root.as_path()));
+      *self.index_manager.write().await =
+        Self::open_index_manager(Some(derived_root.as_path()), Some(derived_root.as_path()));
     }
 
     {
@@ -677,16 +683,117 @@ impl LanguageServer for Backend {
   async fn execute_command(&self, params: ExecuteCommandParams) -> LspResult<Option<serde_json::Value>> {
     eprintln!("Execute command: {}", params.command);
 
+    let to_invalid_params = |message: String| tower_lsp::jsonrpc::Error::invalid_params(message);
+    let to_internal_error = |message: String| tower_lsp::jsonrpc::Error {
+      code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+      message: message.into(),
+      data: None,
+    };
+
     match params.command.as_str() {
       "novelsaga/index" => {
         self
           .client
           .log_message(MessageType::INFO, "Executing novelsaga/index command")
           .await;
+
+        let arg = params
+          .arguments
+          .first()
+          .ok_or_else(|| to_invalid_params("novelsaga/index requires arguments[0].path".to_string()))?;
+        let path_str = arg
+          .get("path")
+          .and_then(serde_json::Value::as_str)
+          .ok_or_else(|| to_invalid_params("novelsaga/index requires string arguments[0].path".to_string()))?;
+        let path = PathBuf::from(path_str);
+
+        if !path.exists() {
+          return Err(to_invalid_params(format!(
+            "Directory does not exist: {}",
+            path.display()
+          )));
+        }
+        if !path.is_dir() {
+          return Err(to_invalid_params(format!(
+            "Path is not a directory: {}",
+            path.display()
+          )));
+        }
+
+        let context = ResolutionContext {
+          workspace_root: None,
+          cli_target_path: Some(path.clone()),
+          cli_cwd: None,
+          show_target_parent: None,
+          lsp_startup_dir: None,
+        };
+        let db_path = MetadataResolver::resolve(&context)
+          .map_err(|error| to_internal_error(format!("Failed to resolve metadata database path for index: {error}")))?;
+        let index_manager = IndexManager::open(&db_path).map_err(|error| {
+          to_internal_error(format!(
+            "Failed to open metadata index at {}: {error}",
+            db_path.display()
+          ))
+        })?;
+
+        let md_files: Vec<PathBuf> = WalkDir::new(&path)
+          .into_iter()
+          .filter_map(std::result::Result::ok)
+          .filter(|e| e.file_type().is_file() && e.path().extension().is_some_and(|ext| ext.eq_ignore_ascii_case("md")))
+          .map(|e| e.path().to_path_buf())
+          .collect();
+
+        let mut indexed = 0usize;
+        let mut failed = 0usize;
+
+        for file_path in md_files {
+          let file_content = match std::fs::read_to_string(&file_path) {
+            Ok(file_content) => file_content,
+            Err(error) => {
+              eprintln!("Failed to read markdown file {}: {error}", file_path.display());
+              failed += 1;
+              continue;
+            }
+          };
+
+          let (frontmatter, body) = if let Some(rest) = file_content.strip_prefix("---") {
+            if let Some(end) = rest.find("---") {
+              let body_str = &rest[end + 3..].trim_start();
+              (serde_json::json!({}), body_str.to_string())
+            } else {
+              (serde_json::json!({}), file_content)
+            }
+          } else {
+            (serde_json::json!({}), file_content)
+          };
+
+          let id = IndexManager::generate_id(&file_path.to_string_lossy());
+          let type_ = resolve_type(&file_path, &frontmatter);
+          let namespace = generate_namespace(&file_path, &path);
+          let entity = MetadataEntity::new(&id, &type_, &namespace, frontmatter, &body);
+
+          if let Err(error) = index_manager.index_entity(&entity) {
+            eprintln!("Failed to index {}: {error}", file_path.display());
+            failed += 1;
+            continue;
+          }
+
+          indexed += 1;
+        }
+
+        index_manager.flush().map_err(|error| {
+          to_internal_error(format!(
+            "Failed to flush metadata index at {}: {error}",
+            db_path.display()
+          ))
+        })?;
+
         Ok(Some(serde_json::json!({
           "status": "ok",
           "command": "novelsaga/index",
-          "message": "Index command received (implementation pending)"
+          "db_path": db_path,
+          "indexed": indexed,
+          "failed": failed
         })))
       }
       "novelsaga/list" => {
@@ -694,10 +801,37 @@ impl LanguageServer for Backend {
           .client
           .log_message(MessageType::INFO, "Executing novelsaga/list command")
           .await;
+
+        let context = ResolutionContext {
+          workspace_root: None,
+          cli_target_path: None,
+          cli_cwd: Some(std::env::current_dir().map_err(|error| {
+            to_internal_error(format!("Failed to get current directory for list command: {error}"))
+          })?),
+          show_target_parent: None,
+          lsp_startup_dir: None,
+        };
+        let db_path = MetadataResolver::resolve(&context)
+          .map_err(|error| to_internal_error(format!("Failed to resolve metadata database path for list: {error}")))?;
+        let index_manager = IndexManager::open(&db_path).map_err(|error| {
+          to_internal_error(format!(
+            "Failed to open metadata index at {}: {error}",
+            db_path.display()
+          ))
+        })?;
+        let entities = index_manager.list_all().map_err(|error| {
+          to_internal_error(format!(
+            "Failed to list metadata entities from {}: {error}",
+            db_path.display()
+          ))
+        })?;
+
         Ok(Some(serde_json::json!({
           "status": "ok",
           "command": "novelsaga/list",
-          "message": "List command received (implementation pending)"
+          "db_path": db_path,
+          "count": entities.len(),
+          "entities": entities
         })))
       }
       "novelsaga/show" => {
@@ -705,11 +839,56 @@ impl LanguageServer for Backend {
           .client
           .log_message(MessageType::INFO, "Executing novelsaga/show command")
           .await;
+
+        let arg = params
+          .arguments
+          .first()
+          .ok_or_else(|| to_invalid_params("novelsaga/show requires arguments[0].path".to_string()))?;
+        let path_str = arg
+          .get("path")
+          .and_then(serde_json::Value::as_str)
+          .ok_or_else(|| to_invalid_params("novelsaga/show requires string arguments[0].path".to_string()))?;
+        let canonical_path = PathBuf::from(path_str)
+          .canonicalize()
+          .map_err(|error| to_invalid_params(format!("Failed to canonicalize show path '{path_str}': {error}")))?;
+        let show_target_parent = canonical_path.parent().map(Path::to_path_buf).ok_or_else(|| {
+          to_invalid_params(format!(
+            "Failed to get parent directory for show path: {}",
+            canonical_path.display()
+          ))
+        })?;
+
+        let context = ResolutionContext {
+          workspace_root: None,
+          cli_target_path: None,
+          cli_cwd: None,
+          show_target_parent: Some(show_target_parent),
+          lsp_startup_dir: None,
+        };
+        let db_path = MetadataResolver::resolve(&context)
+          .map_err(|error| to_internal_error(format!("Failed to resolve metadata database path for show: {error}")))?;
+        let index_manager = IndexManager::open(&db_path).map_err(|error| {
+          to_internal_error(format!(
+            "Failed to open metadata index at {}: {error}",
+            db_path.display()
+          ))
+        })?;
+
+        let entity_id = IndexManager::generate_id(&canonical_path.to_string_lossy());
+        let entity = index_manager.get_by_id(&entity_id).map_err(|error| {
+          to_internal_error(format!(
+            "Failed to query metadata entity for {}: {error}",
+            canonical_path.display()
+          ))
+        })?;
+
         Ok(Some(serde_json::json!({
           "status": "ok",
           "command": "novelsaga/show",
-          "arguments_received": params.arguments.len(),
-          "message": "Show command received (implementation pending)"
+          "db_path": db_path,
+          "entity_id": entity_id,
+          "path": canonical_path,
+          "entity": entity
         })))
       }
       _ => {

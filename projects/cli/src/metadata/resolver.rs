@@ -58,17 +58,18 @@ impl MetadataResolver {
     ];
 
     for candidate in candidates.iter().flatten() {
-      // Check for metadata/ marker
-      if let Some(workspace) = Self::find_metadata_marker(candidate) {
-        return Ok(Self::canonical_path(&workspace));
-      }
-
-      // Check for legacy .novelsaga/cache/index
-      if let Some(workspace) = Self::find_legacy_path(candidate) {
-        // Migrate legacy data to canonical path when safe
-        if let Err(e) = Self::migrate_legacy_data(&workspace) {
+      // Check for legacy .novelsaga/cache/index at THIS LEVEL ONLY (deterministic migration)
+      // Only check direct path, don't search upward for legacy
+      let legacy_check = candidate.join(".novelsaga/cache/index");
+      if legacy_check.exists() {
+        if let Err(e) = Self::migrate_legacy_data(candidate) {
           eprintln!("[novelsaga] Warning: legacy migration failed: {e}");
         }
+        return Ok(Self::canonical_path(candidate));
+      }
+
+      // Check for metadata/ marker (search upward)
+      if let Some(workspace) = Self::find_metadata_marker(candidate) {
         return Ok(Self::canonical_path(&workspace));
       }
     }
