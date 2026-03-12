@@ -13,7 +13,10 @@ use walkdir::WalkDir;
 
 use crate::{
   bridge::{rpc::client::RpcClient, transport::unix_socket::UnixSocketTransport},
-  metadata::index::IndexManager,
+  metadata::{
+    index::IndexManager,
+    resolver::{MetadataResolver, ResolutionContext},
+  },
 };
 /// Subcommands for `metadata` operations
 #[derive(Subcommand, Clone, Debug)]
@@ -116,8 +119,15 @@ async fn handle_index(cmd: IndexCommand) -> anyhow::Result<()> {
     anyhow::bail!("Path is not a directory: {}", path.display());
   }
 
-  // Determine sled database path
-  let db_path = determine_db_path(path)?;
+  // Determine sled database path using MetadataResolver
+  let context = ResolutionContext {
+    workspace_root: None,
+    cli_target_path: Some(path.clone()),
+    cli_cwd: None,
+    show_target_parent: None,
+    lsp_startup_dir: None,
+  };
+  let db_path = MetadataResolver::resolve(&context)?;
   println!("📦 Opening index database at: {}", db_path.display());
 
   // Open IndexManager
@@ -180,36 +190,6 @@ async fn handle_index(cmd: IndexCommand) -> anyhow::Result<()> {
   Ok(())
 }
 
-/// Determine the database path for storing the index
-fn determine_db_path(source_path: &Path) -> anyhow::Result<PathBuf> {
-  // Try to find a novelsaga project root (containing .novelsaga or metadata/ directory)
-  let mut current = source_path;
-  loop {
-    let novelsaga_dir = current.join(".novelsaga");
-    let metadata_dir = current.join("metadata");
-
-    if novelsaga_dir.exists() || metadata_dir.exists() {
-      // Found project root, use .novelsaga/cache/index
-      let cache_dir = novelsaga_dir.join("cache").join("index");
-      std::fs::create_dir_all(&cache_dir)?;
-      return Ok(cache_dir);
-    }
-
-    // Try parent directory
-    match current.parent() {
-      Some(parent) => current = parent,
-      None => break,
-    }
-  }
-
-  // No project root found, use system cache directory
-  let proj_dirs = directories::ProjectDirs::from("rs", "novelsaga", "novelsaga")
-    .ok_or_else(|| anyhow::anyhow!("Could not determine project directories"))?;
-  let cache_dir = proj_dirs.cache_dir().join("metadata");
-  std::fs::create_dir_all(&cache_dir)?;
-  Ok(cache_dir)
-}
-
 /// Process a single markdown file
 /// Process a single markdown file
 fn process_file(file_path: &Path, workspace_root: &Path, index_manager: &IndexManager) -> anyhow::Result<()> {
@@ -248,17 +228,19 @@ fn process_file(file_path: &Path, workspace_root: &Path, index_manager: &IndexMa
 
 #[allow(clippy::unused_async)]
 async fn handle_list(cmd: ListCommand) -> anyhow::Result<()> {
-  use directories::ProjectDirs;
-
-  // Get default cache directory
-  let cache_dir = ProjectDirs::from("rs", "novelsaga", "novelsaga")
-    .map(|dirs| dirs.cache_dir().join("metadata"))
-    .ok_or_else(|| anyhow::anyhow!("Could not determine cache directory. Please check your home directory."))?;
+  // Determine database path using MetadataResolver
+  let context = ResolutionContext {
+    workspace_root: None,
+    cli_target_path: None,
+    cli_cwd: Some(std::env::current_dir()?),
+    show_target_parent: None,
+    lsp_startup_dir: None,
+  };
+  let cache_dir = MetadataResolver::resolve(&context)?;
 
   // Open IndexManager
   let index_manager =
     IndexManager::open(&cache_dir).map_err(|e| anyhow::anyhow!("Failed to open index database: {e}"))?;
-
   // Get all entities using list_all method
   let mut entities: Vec<MetadataEntity> = index_manager
     .list_all()
@@ -428,7 +410,6 @@ fn truncate(s: &str, max_width: usize) -> String {
 #[allow(clippy::unused_async)]
 async fn handle_show(cmd: ShowCommand) -> anyhow::Result<()> {
   use anyhow::Context;
-  use directories::ProjectDirs;
 
   // Get canonical path for consistent ID generation
   let canonical_path = cmd
@@ -440,10 +421,16 @@ async fn handle_show(cmd: ShowCommand) -> anyhow::Result<()> {
   // Generate entity ID from path using blake3 hash
   let entity_id = IndexManager::generate_id(&path_str);
 
-  // Determine index database path (using cache_dir for consistency with handle_list)
-  let cache_dir = ProjectDirs::from("rs", "novelsaga", "novelsaga")
-    .map(|dirs| dirs.cache_dir().join("metadata"))
-    .ok_or_else(|| anyhow::anyhow!("Could not determine cache directory. Please check your home directory."))?;
+  // Determine index database path using MetadataResolver
+  let show_target_parent = canonical_path.parent().map(std::path::Path::to_path_buf);
+  let context = ResolutionContext {
+    workspace_root: None,
+    cli_target_path: None,
+    cli_cwd: None,
+    show_target_parent,
+    lsp_startup_dir: None,
+  };
+  let cache_dir = MetadataResolver::resolve(&context)?;
 
   // Open index manager
   let index_manager =
