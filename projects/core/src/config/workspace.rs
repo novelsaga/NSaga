@@ -12,10 +12,34 @@ pub struct WorkspaceConfig {
 impl Default for WorkspaceConfig {
   fn default() -> Self {
     let novelsaga_dir = ".novelsaga".to_string();
-    let cache_dir = format!("{}/cache", &novelsaga_dir);
+    let cache_dir = ".cache/novelsaga".to_string();
     Self {
       cache_dir,
       novelsaga_dir,
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_default_cache_dir_is_xdg_compliant() {
+    let config = WorkspaceConfig::default();
+    assert_eq!(config.cache_dir, ".cache/novelsaga");
+  }
+
+  #[test]
+  fn test_default_novelsaga_dir() {
+    let config = WorkspaceConfig::default();
+    assert_eq!(config.novelsaga_dir, ".novelsaga");
+  }
+
+  #[test]
+  fn test_default_structure() {
+    let config = WorkspaceConfig::default();
+    assert_eq!(config.cache_dir, ".cache/novelsaga");
+    assert_eq!(config.novelsaga_dir, ".novelsaga");
   }
 }
