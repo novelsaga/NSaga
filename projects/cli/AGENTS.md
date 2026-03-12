@@ -294,4 +294,12 @@ pub async fn handle_metadata_command(command: MetadataCommands) -> anyhow::Resul
 | `list`     | `[--detailed]` | List all indexed directories |
 | `show`     | `<PATH>` | Show metadata for a specific file |
 
-> **Status**: Handlers are currently `todo!()` stubs — implementation pending.
+### Metadata Storage Contract
+
+All metadata commands use a shared resolver that:
+- Resolves workspace roots from explicit context or fallback context
+- Stores index at canonical path: `<workspace>/.cache/novelsaga/sled`
+- Migrates legacy workspace-local `.novelsaga/cache/index` to canonical location
+- Never falls back to global OS cache directories
+
+The resolver is located in `projects/cli/src/metadata/resolver.rs`.

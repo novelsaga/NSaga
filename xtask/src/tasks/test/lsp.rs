@@ -259,7 +259,7 @@ fn novelsaga_binary_path() -> Result<PathBuf> {
 }
 
 fn expected_index_dir_for_workspace(workspace_root: &Path) -> PathBuf {
-  workspace_root.join(".novelsaga").join("cache").join("index")
+  workspace_root.join(".cache").join("novelsaga").join("sled")
 }
 
 async fn start_server(
@@ -344,7 +344,7 @@ async fn wait_for_watched_registration(flag: &AtomicBool, timeout_secs: u64) -> 
 fn lsp_launch_command(binary: &Path, workspace_root: &Path) -> Result<(String, Vec<String>, Option<PathBuf>)> {
   #[cfg(not(windows))]
   {
-    let helper_dir = workspace_root.join(".novelsaga");
+    let helper_dir = workspace_root.join(".cache").join("novelsaga");
     std::fs::create_dir_all(&helper_dir).context("Failed to create helper directory for LSP launch")?;
 
     let pid_file = helper_dir.join("lsp-e2e.pid");

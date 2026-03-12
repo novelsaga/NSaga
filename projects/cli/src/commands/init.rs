@@ -3,7 +3,7 @@ pub fn run(path: &std::path::Path) {
   eprintln!("Initializing project at: {}", path.display());
 
   // TODO: Implement actual project initialization
-  // - Create .novelsaga directory structure
+  // - Generate default config files
   // - Generate default config files
   // - Set up project metadata
 }

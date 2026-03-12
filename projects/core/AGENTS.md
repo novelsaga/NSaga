@@ -17,7 +17,7 @@ projects/core/src/
 │   ├── file_def.rs             # CONFIG_FILE_NAMES, ignore patterns
 │   ├── fileformat/
 │   │   └── mod.rs              # NovelSagaFileFormat enum
-│   ├── workspace.rs            # WorkspaceConfig (cache_dir, novelsaga_dir)
+│   ├── workspace.rs            # WorkspaceConfig (cache_dir)
 │   └── formatter.rs            # FormatterConfig (fmt settings)
 ├── library/
 │   ├── mod.rs                  # Library utilities

@@ -200,8 +200,7 @@ mod tests {
     let content = r#"
       export default {
         workspace: {
-          cache_dir: ".novelsaga/cache",
-          novelsaga_dir: ".novelsaga"
+          cache_dir: ".cache/novelsaga"
         },
         fmt: {
           indent_spaces: 2,

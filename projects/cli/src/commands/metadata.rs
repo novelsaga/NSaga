@@ -180,6 +180,8 @@ async fn handle_index(cmd: IndexCommand) -> anyhow::Result<()> {
   std::io::Write::flush(&mut std::io::stdout())?;
   index_manager.flush()?;
   println!("✓");
+  // Explicitly close database to release locks
+  index_manager.close()?;
   // Print summary
   println!("\n📊 Indexing Complete:");
   println!("   Total files: {total_files}");
