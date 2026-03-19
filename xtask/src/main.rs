@@ -89,6 +89,7 @@ enum Commands {
   },
   /// Run end-to-end tests for CLI
   E2e,
+  /// Run end-to-end tests for LSP
   LspE2e,
   /// Clean all build artifacts
   CleanAll,
