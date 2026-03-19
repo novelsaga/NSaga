@@ -49,10 +49,14 @@ nsaga/
 ### Environment Setup
 
 ```bash
-pnpm install                    # Install JS deps at root only
+# Install JavaScript dependencies
+pnpm install                    # Run at workspace root only
+
+# Verify Rust toolchain
+cargo --version                 # Should show nightly toolchain
 ```
 
-_WHY: devenv manages all tool versions and git hooks; without it, clippy/rustfmt may differ from CI._
+_WHY: This project requires Rust nightly toolchain for Edition 2024 features; all tools are managed by the Nix flake to ensure consistent versions across environments._
 
 ### Build Commands
 
