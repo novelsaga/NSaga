@@ -1,118 +1,294 @@
 # NOVELSAGA PROJECT KNOWLEDGE BASE
 
-## OVERVIEW
+## Golden Rules
 
-**NovelSaga** - Multi-Editor Novel Editing System Backend (Rust + TypeScript)
+1. **Never `npm install` in subprojects** — use `pnpm install` at workspace root only.
+2. **Always use `node:` prefix for built-ins** — e.g., `node:fs` not `fs`.
+3. **Call `Initializer::init()` before `Initializer::get()`** — state must be initialized.
+4. **Print to stderr, never stdout in bridges** — stdout is reserved for JSON-RPC protocol.
+5. **Keep tests in source files** — never create separate `.test.rs` files.
+6. **Import order: std → external → crate** — follow `rustfmt.toml` grouping.
+7. **Use `thiserror` for libraries, `anyhow` for apps** — structured errors vs. propagation.
+8. **Use TDD for development** — write failing test first, then minimal code to pass, then refactor.
+9. **Use git-worktree for large changes** — prevent accidental data loss on extensive refactors.
 
-- **LSP Server**: For editors with LSP support (VSCode, Neovim)
-- **C Library**: Via Diplomat FFI for iOS, Android, Web (.so/WASM)
-- **JS Bridges**: JSON-RPC 2.0 communication between Rust CLI and Node.js/Bun/Deno
+---
 
-## TECHNOLOGY STACK
-
-- **Rust**: Core logic, LSP server, and FFI bindings.
-- **TypeScript**: Bridge implementations and client-side tooling.
-- **Diplomat FFI**: Generates bindings for multiple languages from Rust source.
-- **JSON-RPC 2.0**: Protocol for CLI-to-Bridge communication.
-- **Nix**: Reproducible development environments and builds.
-
-## PROJECT STRUCTURE
+## Project Skeleton
 
 ```
 nsaga/
 ├── projects/
-│   ├── core/              # Rust core library: state, config, and domain logic
-│   ├── cli/               # Rust LSP server & CLI: bridge management and discovery
-│   └── cli-js-bridges/    # TypeScript bridges: filesystem, git, and external services
-├── xtask/                 # Build automation and development workflows
-├── docs/                  # Project documentation
-└── out/                   # Compiled outputs and build artifacts
+│   ├── core/              # Rust core: state, config, domain logic
+│   │   └── src/
+│   │       ├── metadata/  # Entity models, parsing, query traits
+│   │       ├── state/     # Global state, initialization
+│   │       └── config/    # Configuration types
+│   ├── cli/               # Rust LSP server & CLI
+│   │   └── src/
+│   │       ├── bridge/    # JS bridge management, RPC
+│   │       ├── lsp/       # LSP backend implementation
+│   │       ├── metadata/  # IndexManager, CacheManager, etc.
+│   │       └── commands/  # CLI command handlers
+│   └── cli-js-bridges/    # TypeScript bridges (excluded from workspace)
+│       ├── bridge-core/
+│       ├── bridge-nodejs/
+│       ├── bridge-bun/
+│       └── bridge-deno/
+├── xtask/                 # Build automation tasks
+├── .cargo/
+│   └── config.toml        # Cargo aliases (xtask)
+├── flake.nix              # Nix development environment & hooks
+└── out/                   # Build outputs
 ```
 
-## METADATA STORAGE CONTRACT
+---
 
-NovelSaga maintains a persistent metadata store for indexing and state management.
+## Development Workflow
 
-- **Canonical Path**: `<workspace>/.cache/novelsaga/sled`
-- **Database**: Sled (embedded key-value store)
-- **Shared Access**: The CLI and LSP server share the same database by resolving the canonical path relative to the workspace root.
-- **Fallback Policy**: The resolver uses a pure context-derived fallback. It does not rely on specific markers like `metadata/`.
-
-## QUICK COMMANDS
+### Environment Setup
 
 ```bash
-# Development Environment (REQUIRED)
-direnv allow                          # Load Nix environment
-
-# Build
-pnpm install                          # Install JS deps (root only)
-xtask build-js                        # Build JS bridges and generate types
-xtask cli                             # Build CLI for the current platform
-xtask build-all                       # Build the entire project
-cargo build                           # Standard Rust build
-
-# Test
-cargo test                            # Run all Rust tests
-cargo test -p novelsaga-cli           # Run CLI tests only
-cargo test <name> -- --ignored        # Run specific ignored tests
-xtask e2e                             # Execute end-to-end tests
-
-# Lint & Format
-cargo clippy --all-targets            # Lint Rust code
-pnpm exec eslint .                    # Lint JS/TS code
-pnpm exec prettier --write .          # Format JS/TS code
-
-# Nix Build
-nix build                             # Build CLI via Nix
-nix build .#bundle                    # Build all platform bundles
+pnpm install                    # Install JS deps at root only
 ```
 
-## CONVENTIONS
+_WHY: devenv manages all tool versions and git hooks; without it, clippy/rustfmt may differ from CI._
+
+### Build Commands
+
+```bash
+# Rust builds
+cargo build
+cargo build --release
+cargo build -p novelsaga-cli
+
+# xtask automation (via cargo alias)
+cargo xtask build-js            # Build JS bridges
+cargo xtask cli                 # Build CLI binary
+cargo xtask build-all           # Build everything
+
+# Nix builds
+nix build
+nix build .#bundle
+```
+
+_WHY: xtask provides cross-platform build orchestration; the cargo alias in `.cargo/config.toml` makes it callable as `cargo xtask`._
+
+### Test Commands
+
+```bash
+cargo test                      # All tests
+cargo test -p novelsaga-cli     # Package-specific
+cargo test <name>               # Single test by name
+cargo test -- --nocapture       # With output
+
+# E2E tests
+cargo xtask e2e
+cargo xtask lsp-e2e
+```
+
+_WHY: Tests are colocated in source files (not `tests/` folders) to keep context close; E2E tests verify full CLI workflows._
+
+### TDD Workflow
+
+Follow test-driven development:
+
+1. **Red**: Write failing test first
+2. **Green**: Write minimal code to make test pass
+3. **Refactor**: Clean up while keeping tests green
+
+_WHY: TDD ensures code is testable by design, catches bugs early, and documents behavior through tests._
+
+### Large Changes Workflow
+
+For extensive refactors or multi-file changes, use git-worktree:
+
+```bash
+# Create a new worktree for your feature
+git worktree add ../nsaga-feature-branch feature-branch-name
+cd ../nsaga-feature-branch
+
+# Work on your changes...
+# If something goes wrong, the original worktree is untouched
+
+# Clean up when done
+git worktree remove ../nsaga-feature-branch
+```
+
+_WHY: Worktrees provide isolation for risky changes; if a refactor goes wrong, your original working directory remains intact._
+
+### Lint & Format
+
+```bash
+# Rust
+cargo clippy --all-targets --all-features --workspace -- -D warnings
+cargo fmt
+
+# TypeScript
+pnpm exec eslint .
+pnpm exec prettier --write .
+
+# Unified (runs all formatters)
+treefmt
+```
+
+_WHY: Pre-commit hooks (defined in `flake.nix`) automatically run clippy, eslint, and treefmt; manual runs should match hook behavior._
+
+---
+
+## Code Style Conventions
 
 ### Rust
 
-- **Edition 2024**: Nightly features allowed (e.g., `#![feature(mpmc_channel)]`).
-- **In-file Tests**: Modules marked with `#[cfg(test)]` stay in the same file as source.
-- **Type Exports**: Use `#[derive(TS)]` with `#[ts(export, export_to = "_config.ts")]` for TS integration.
-- **State Initialization**: Call `Initializer::init(feature)` before attempting `Initializer::get()`.
+**Formatting** (`rustfmt.toml`):
 
-### TypeScript/JavaScript
+- 2-space indentation, 120 char width
+- Import grouping: `StdExternalCrate` (std → external → crate)
+- Vertical trailing commas only
 
-- **Runtime**: Node.js ≥20 (Native TS support preferred for newer versions).
-- **Modules**: ESM only (`"type": "module"`).
-- **Package Management**: pnpm workspaces. Never install dependencies in subprojects.
-- **Bridge Pattern**: Use `createBridgeServer()` factories for service registration.
-- **Routing**: Use `"service.method"` format for JSON-RPC calls.
+**Import Order**:
 
-### Git & Commits
+```rust
+use std::sync::Arc;                           // 1. std
+use novelsaga_core::state::Initializer;       // 2. external crates
+use crate::{args::Cli, bridge::BridgeManager}; // 3. crate
+```
 
-- **Style**: Conventional commits (`feat:`, `fix:`, `refactor:`).
-- **Hooks**: Automated checks via clippy and treefmt.
+_WHY: Consistent ordering reduces merge conflicts and makes dependencies obvious._
 
-## ANTI-PATTERNS
+**Naming**:
+| Type | Convention | Example |
+|------|-----------|---------|
+| Functions/variables | `snake_case` | `handle_command`, `bridge_manager` |
+| Structs/Enums/Traits | `PascalCase` | `BridgeManager`, `MetadataQuery` |
+| Constants | `SCREAMING_SNAKE_CASE` | `PARSE_ERROR` |
+| Modules | `snake_case` | `mod metadata;` |
 
-| Category     | Forbidden                                    | Do Instead                                      |
-| :----------- | :------------------------------------------- | :---------------------------------------------- |
-| Dependencies | `npm install` in subprojects                 | `pnpm install` at workspace root                |
-| Types        | Manual edits to `_config.ts`                 | Extend types in separate files                  |
-| State        | Accessing `Initializer` before `init`        | Ensure `init()` is called during startup        |
-| Bridges      | Relative imports crossing project boundaries | Use `@nsaga/` workspace aliases                 |
-| Logs         | Printing to `stdout` in bridges              | Use `stderr` for logs; `stdout` is for JSON-RPC |
-| Tests        | Creating separate `.test.rs` files           | Keep tests in the source file                   |
+**Error Handling**:
 
-## VSCODE DEVELOPMENT
+```rust
+// Libraries: structured errors with thiserror
+#[derive(Debug, Error)]
+pub enum BridgeError {
+    #[error("JSON parse error: {0}")]
+    JsonParseError(#[from] serde_json::Error),
+    #[error("RPC error: code={code}, message={message}")]
+    RpcError { code: i32, message: String },
+}
 
-### Recommended Setup
+// Applications: anyhow for propagation
+use anyhow::Result;
+fn main() -> Result<()> { ... }
+```
 
-1. **Install Extensions**: Accept the workspace recommended extensions.
-2. **Environment**: Run `direnv allow` in your terminal to sync the Nix environment.
-3. **Status Bar**: Confirm `rust-analyzer` and `ESLint` are active.
+_WHY: `thiserror` provides structured errors for API consumers; `anyhow` is ergonomic for CLI error propagation._
 
-### Keyboard Shortcuts
+**Testing** (in-file only):
 
-- **Go to Definition**: `F12`
-- **Find All References**: `Shift + F12`
-- **Rename Symbol**: `F2`
-- **Quick Fix**: `Ctrl + .` (or `Cmd + .`)
-- **Command Palette**: `Ctrl + Shift + P`
-- **Search Files**: `Ctrl + P`
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_feature() {
+        assert_eq!(result, expected);
+    }
+}
+```
+
+_WHY: Colocated tests reduce navigation overhead and keep test context close to implementation._
+
+### TypeScript
+
+**Modules**: ESM only (`"type": "module"`), target ESNext, strict mode.
+
+**Imports**:
+
+```typescript
+import type { BridgeConfig } from '@nsaga/bridge-core' // type imports first
+import { BridgeServer } from '@nsaga/bridge-core' // value imports
+import { localUtil } from './utils.js' // relative with .js
+```
+
+_WHY: Explicit type imports help bundlers tree-shake; relative imports need `.js` extension for ESM compatibility._
+
+**Naming**:
+| Type | Convention | Example |
+|------|-----------|---------|
+| Variables/functions | `camelCase` | `createBridgeServer` |
+| Classes/Interfaces | `PascalCase` | `BridgeServer`, `ErrorHandler` |
+
+---
+
+## Technology-Specific Rules
+
+### Metadata Storage
+
+- **Canonical Path**: `<workspace>/.cache/novelsaga/sled`
+- **Database**: Sled (embedded KV)
+- **Shared Access**: CLI and LSP resolve the same canonical path
+
+_WHY: Shared database allows CLI and LSP to see consistent state without synchronization overhead._
+
+### JSON-RPC Bridge Protocol
+
+Format: `"service.method"`
+
+```typescript
+// Request
+{ "jsonrpc": "2.0", "method": "config.get", "params": { "key": "theme" }, "id": 1 }
+// Response
+{ "jsonrpc": "2.0", "result": { "theme": "dark" }, "id": 1 }
+```
+
+Use `createBridgeServer()` factory for bridge creation.
+
+_WHY: Namespace prefix prevents method collisions when multiple services run in one process._
+
+### TypeScript Integration
+
+Export Rust types via `ts-rs`:
+
+```rust
+#[derive(TS)]
+#[ts(export, export_to = "_config.ts")]
+pub struct Config {
+    pub name: String,
+}
+```
+
+_WHY: `ts-rs` generates TypeScript bindings at compile time, keeping Rust and TS types in sync._
+
+---
+
+## Git Hooks (Automated)
+
+Defined in `flake.nix`, run on every commit:
+
+1. **commitizen** — Conventional commit format enforcement
+2. **clippy** — `cargo clippy --all-targets --all-features --workspace -- -D warnings`
+3. **eslint** — Lint `.ts/.cts/.mts` files
+4. **treefmt** — Unified formatting (rustfmt, alejandra, taplo, shellcheck)
+
+_WHY: Automated hooks ensure all commits meet quality standards without manual intervention._
+
+---
+
+## Summary Checklist
+
+Before committing, verify:
+
+- [ ] `cargo clippy` passes (or will pass via hook)
+- [ ] Tests are in the source file, not separate `.test.rs`
+- [ ] TypeScript imports use `node:` prefix for built-ins
+- [ ] Bridges log to stderr, not stdout
+- [ ] State is initialized with `Initializer::init()` before use
+
+Key workspace facts:
+
+- **Edition**: Rust 2024 (nightly toolchain)
+- **Indent**: 2 spaces (not 4)
+- **Tests**: Colocated in `#[cfg(test)]` modules
+- **Package manager**: pnpm (never npm in subprojects)
+- **Development**: TDD workflow, git-worktree for large changes
