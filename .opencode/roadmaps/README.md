@@ -20,12 +20,14 @@ These go in `.sisyphus/plans/`:
 
 ## Current Contents
 
-| File                               | Type             | Status                                     |
-| ---------------------------------- | ---------------- | ------------------------------------------ |
-| `cli-next-steps.md`                | Priority Roadmap | Active - P1/P2/P3 priorities               |
-| `p2-metadata-manager-breakdown.md` | Design Spec      | May be stale - 32 tasks, verify before use |
-| `p3-lsp-integration-breakdown.md`  | Design Spec      | May be stale - 28 tasks, depends on P2     |
-| `future-enhancements.md`           | Backlog          | Active - long-term wishlist                |
+| File                                  | Type             | Status                                     |
+| ------------------------------------- | ---------------- | ------------------------------------------ |
+| `cli-next-steps.md`                   | Priority Roadmap | Active - P1/P2/P3 priorities               |
+| `p2-metadata-manager-breakdown.md`    | Design Spec      | May be stale - 32 tasks, verify before use |
+| `p3-lsp-integration-breakdown.md`     | Design Spec      | May be stale - 28 tasks, depends on P2     |
+| `future-enhancements.md`              | Backlog          | Active - long-term wishlist                |
+| `metadata-storage-risk-register.md`   | Risk Register    | Resolved - 所有风险已通过统一存储契约修复  |
+| `project-status-report-2026-03-19.md` | Status Report    | **最新** - 代码验证后的实际项目状态评估    |
 
 ## Usage Notes
 
