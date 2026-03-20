@@ -123,6 +123,22 @@ impl MetadataEntity {
       .map(ToString::to_string)
   }
 
+  /// Truncate body text to a maximum length, adding ellipsis if truncated.
+  /// Uses character-based truncation (not byte-based) for Unicode safety.
+  fn truncate_body_preview(body: &str, max_len: usize) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+      return String::new();
+    }
+    let char_count = trimmed.chars().count();
+    if char_count <= max_len {
+      trimmed.to_string()
+    } else {
+      let truncated: String = trimmed.chars().take(max_len).collect();
+      format!("{truncated}...")
+    }
+  }
+
   #[must_use]
   pub fn to_hover_markdown(&self) -> String {
     let title = ["name", "title"]
@@ -137,9 +153,10 @@ impl MetadataEntity {
       format!("- ID: `{}`", self.id),
     ];
 
-    if !self.body.trim().is_empty() {
+    let body_preview = Self::truncate_body_preview(&self.body, 100);
+    if !body_preview.is_empty() {
       sections.push(String::new());
-      sections.push(self.body.trim().to_string());
+      sections.push(body_preview);
     }
 
     sections.join("\n")
