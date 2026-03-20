@@ -122,6 +122,28 @@ impl MetadataEntity {
       .and_then(|v| v.as_str())
       .map(ToString::to_string)
   }
+
+  #[must_use]
+  pub fn to_hover_markdown(&self) -> String {
+    let title = ["name", "title"]
+      .into_iter()
+      .find_map(|key| self.get_field(key).and_then(|value| value.as_str()))
+      .unwrap_or(&self.id);
+
+    let mut sections = vec![
+      format!("# {title}"),
+      format!("- Type: `{}`", self.type_),
+      format!("- Namespace: `{}`", self.namespace),
+      format!("- ID: `{}`", self.id),
+    ];
+
+    if !self.body.trim().is_empty() {
+      sections.push(String::new());
+      sections.push(self.body.trim().to_string());
+    }
+
+    sections.join("\n")
+  }
 }
 
 impl TryFrom<(MarkdownParts, &Path, &Path)> for MetadataEntity {
@@ -344,5 +366,24 @@ mod tests {
       return;
     }
     MetadataEntity::export().expect("failed to export MetadataEntity");
+  }
+
+  #[test]
+  fn to_hover_markdown_prefers_title_and_includes_metadata_fields() {
+    let entity = MetadataEntity::new(
+      "hero-alpha",
+      "character",
+      "cast",
+      json!({ "title": "Hero Alpha" }),
+      "Brave hero body.",
+    );
+
+    let markdown = entity.to_hover_markdown();
+
+    assert!(markdown.contains("# Hero Alpha"));
+    assert!(markdown.contains("- Type: `character`"));
+    assert!(markdown.contains("- Namespace: `cast`"));
+    assert!(markdown.contains("- ID: `hero-alpha`"));
+    assert!(markdown.contains("Brave hero body."));
   }
 }

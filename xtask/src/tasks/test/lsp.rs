@@ -67,7 +67,10 @@ pub fn run_e2e_test() -> Result<()> {
   runtime.block_on(async {
     run_lsp_e2e_test_impl(&binary).await?;
     run_lsp_didchangewatchedfiles_e2e_test_impl(&binary).await?;
-    run_lsp_hover_completion_diagnostics_e2e_test_impl(&binary).await?;
+    run_lsp_hover_e2e_test_impl(&binary).await?;
+    run_lsp_completion_e2e_test_impl(&binary).await?;
+    run_lsp_diagnostics_e2e_test_impl(&binary).await?;
+    run_lsp_diagnostics_clear_e2e_test_impl(&binary).await?;
     Ok::<(), anyhow::Error>(())
   })?;
 
@@ -237,57 +240,228 @@ async fn run_lsp_didchangewatchedfiles_e2e_test_impl(binary: &Path) -> Result<()
   Ok(())
 }
 
-async fn run_lsp_hover_completion_diagnostics_e2e_test_impl(binary: &Path) -> Result<()> {
-  println!("• run_lsp_hover_completion_diagnostics_e2e_test");
+async fn run_lsp_hover_e2e_test_impl(binary: &Path) -> Result<()> {
+  println!("• run_lsp_hover_e2e_test");
 
   let workspace = TempDir::new().context("Failed to create temporary workspace")?;
-  let article_path = workspace.path().join("article.md");
-  let original_text = "你好world\n\n第二段test";
+  let metadata_path = workspace
+    .path()
+    .join("book")
+    .join("metadata")
+    .join("characters")
+    .join("hero.md");
+  std::fs::create_dir_all(metadata_path.parent().context("Missing metadata parent")?)
+    .context("Failed to create metadata parent")?;
 
-  std::fs::write(&article_path, original_text).context("Failed to write initial article.md")?;
+  let metadata_text = "---\ntitle: Hero Alpha\ntype: character\n---\nBrave hero body.";
+  std::fs::write(&metadata_path, metadata_text).context("Failed to write metadata file")?;
 
-  let (server, initialize_result, _, pid_file, mut diagnostics_rx) = start_server(binary, workspace.path()).await?;
+  let (server, initialize_result, _, pid_file, _diagnostics_rx) = start_server(binary, workspace.path()).await?;
   assert_core_capabilities(&initialize_result)?;
 
-  let article_uri = file_url(&article_path)?;
+  let metadata_uri = file_url(&metadata_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: metadata_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: metadata_text.to_string(),
+      },
+    })
+    .await;
 
+  let hover = request_hover(&server, metadata_uri, Position { line: 1, character: 3 }).await?;
+  let hover = hover.ok_or_else(|| anyhow!("hover request returned None for metadata document"))?;
+  let rendered = hover_contents_to_string(&hover);
+  assert!(
+    rendered.contains("Hero Alpha"),
+    "hover should include title/name, got: {rendered}"
+  );
+  assert!(
+    rendered.contains("character"),
+    "hover should include entity type, got: {rendered}"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ metadata hover passed");
+  Ok(())
+}
+
+async fn run_lsp_completion_e2e_test_impl(binary: &Path) -> Result<()> {
+  println!("• run_lsp_completion_e2e_test");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let metadata_dir = workspace.path().join("book").join("metadata").join("characters");
+  let article_path = workspace.path().join("chapter-01.md");
+  std::fs::create_dir_all(&metadata_dir).context("Failed to create metadata directory")?;
+
+  std::fs::write(
+    metadata_dir.join("hero-alpha.md"),
+    "---\ntitle: Hero Alpha\ntype: character\n---\nAlpha body",
+  )
+  .context("Failed to write hero-alpha metadata")?;
+  std::fs::write(
+    metadata_dir.join("hero-beta.md"),
+    "---\ntitle: Hero Beta\ntype: character\n---\nBeta body",
+  )
+  .context("Failed to write hero-beta metadata")?;
+  std::fs::write(&article_path, "Hero").context("Failed to write article.md")?;
+
+  let (server, initialize_result, watched_registration_ready, pid_file, _diagnostics_rx) =
+    start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+  wait_for_watched_registration(&watched_registration_ready, 5).await?;
+
+  notify_watched_files(
+    &server,
+    vec![
+      file_event(&metadata_dir.join("hero-alpha.md"), FileChangeType::CREATED)?,
+      file_event(&metadata_dir.join("hero-beta.md"), FileChangeType::CREATED)?,
+    ],
+  )
+  .await?;
+  sleep(Duration::from_millis(200)).await;
+
+  let article_uri = file_url(&article_path)?;
   server
     .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
       text_document: TextDocumentItem {
         uri: article_uri.clone(),
         language_id: "markdown".to_string(),
         version: 1,
-        text: original_text.to_string(),
+        text: "Hero".to_string(),
       },
     })
     .await;
 
-  let test_position = Position { line: 0, character: 2 };
-
-  let hover_err = request_hover(&server, article_uri.clone(), test_position)
-    .await
-    .expect_err("hover should fail since backend doesn't implement it yet");
+  let completion = request_completion(&server, article_uri, Position { line: 0, character: 4 }).await?;
+  let items = completion_items(completion).ok_or_else(|| anyhow!("completion request returned None"))?;
   assert!(
-    hover_err.to_string().contains("MethodNotFound"),
-    "expected MethodNotFound error for hover, got: {hover_err}"
+    items.iter().any(|item| {
+      item.label == "Hero Alpha"
+        && item.insert_text.as_deref() == Some("Hero Alpha")
+        && item.detail.as_deref() == Some("character · book")
+    }),
+    "completion should include Hero Alpha with expected contract, got: {items:?}"
   );
-  println!("  ℹ️  hover correctly returns MethodNotFound");
-
-  let completion_err = request_completion(&server, article_uri.clone(), test_position)
-    .await
-    .expect_err("completion should fail since backend doesn't implement it yet");
-  assert!(
-    completion_err.to_string().contains("MethodNotFound"),
-    "expected MethodNotFound error for completion, got: {completion_err}"
-  );
-  println!("  ℹ️  completion correctly returns MethodNotFound");
-
-  let diagnostics = collect_diagnostics_notifications(&mut diagnostics_rx, Duration::from_secs(1)).await?;
-  println!("  ℹ️  diagnostics collected: {} items", diagnostics.len());
 
   shutdown_server(&server, pid_file.as_deref()).await?;
   drop(server);
-  println!("  ✅ hover, completion, diagnostics harness test passed");
+  println!("  ✅ manual completion passed");
+  Ok(())
+}
+
+async fn run_lsp_diagnostics_e2e_test_impl(binary: &Path) -> Result<()> {
+  println!("• run_lsp_diagnostics_e2e_test");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let metadata_path = workspace
+    .path()
+    .join("book\u{2f}metadata")
+    .join("characters")
+    .join("broken.md");
+  std::fs::create_dir_all(metadata_path.parent().context("Missing metadata parent")?)
+    .context("Failed to create metadata parent")?;
+
+  let metadata_text = "---\ntitle: Broken Hero\nthis is not valid frontmatter\n---\nBody";
+  std::fs::write(&metadata_path, metadata_text).context("Failed to write broken metadata")?;
+
+  let (server, initialize_result, _, pid_file, mut diagnostics_rx) = start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+
+  let metadata_uri = file_url(&metadata_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: metadata_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: metadata_text.to_string(),
+      },
+    })
+    .await;
+
+  let diagnostics = wait_for_diagnostics(&mut diagnostics_rx, &metadata_uri, 1, Duration::from_secs(2)).await?;
+  assert_eq!(
+    diagnostics.diagnostics.len(),
+    1,
+    "expected one diagnostic, got {diagnostics:?}"
+  );
+  assert_eq!(
+    diagnostics.diagnostics[0].message,
+    "Malformed frontmatter line: this is not valid frontmatter"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ diagnostics publish passed");
+  Ok(())
+}
+
+async fn run_lsp_diagnostics_clear_e2e_test_impl(binary: &Path) -> Result<()> {
+  println!("• run_lsp_diagnostics_clear_e2e_test");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let metadata_path = workspace
+    .path()
+    .join("book")
+    .join("metadata")
+    .join("characters")
+    .join("recover.md");
+  std::fs::create_dir_all(metadata_path.parent().context("Missing metadata parent")?)
+    .context("Failed to create metadata parent")?;
+
+  let broken_text = "---\ntitle: Recovering Hero\nthis is not valid frontmatter\n---\nBody";
+  std::fs::write(&metadata_path, broken_text).context("Failed to write recover metadata")?;
+
+  let (server, initialize_result, _, pid_file, mut diagnostics_rx) = start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+
+  let metadata_uri = file_url(&metadata_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: metadata_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: broken_text.to_string(),
+      },
+    })
+    .await;
+
+  let first = wait_for_diagnostics(&mut diagnostics_rx, &metadata_uri, 1, Duration::from_secs(2)).await?;
+  assert_eq!(
+    first.diagnostics.len(),
+    1,
+    "expected one initial diagnostic, got {first:?}"
+  );
+
+  let fixed_text = "---\ntitle: Recovering Hero\ntype: character\n---\nBody";
+  server
+    .send_notification::<DidChangeTextDocument>(DidChangeTextDocumentParams {
+      text_document: VersionedTextDocumentIdentifier {
+        uri: metadata_uri.clone(),
+        version: 2,
+      },
+      content_changes: vec![TextDocumentContentChangeEvent {
+        range: None,
+        range_length: None,
+        text: fixed_text.to_string(),
+      }],
+    })
+    .await;
+
+  let cleared = wait_for_diagnostics(&mut diagnostics_rx, &metadata_uri, 2, Duration::from_secs(2)).await?;
+  assert!(
+    cleared.diagnostics.is_empty(),
+    "expected diagnostics clear notification, got {cleared:?}"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ diagnostics clear passed");
   Ok(())
 }
 
@@ -570,6 +744,43 @@ async fn collect_diagnostics_notifications(
   }
 
   Ok(diagnostics)
+}
+
+async fn wait_for_diagnostics(
+  diagnostics_rx: &mut Receiver<PublishDiagnosticsParams>,
+  uri: &Url,
+  version: i32,
+  timeout_duration: Duration,
+) -> Result<PublishDiagnosticsParams> {
+  let diagnostics = collect_diagnostics_notifications(diagnostics_rx, timeout_duration).await?;
+  diagnostics
+    .into_iter()
+    .find(|params| params.uri == *uri && params.version == Some(version))
+    .ok_or_else(|| anyhow!("timed out waiting for diagnostics for {uri} at version {version}"))
+}
+
+fn completion_items(response: Option<CompletionResponse>) -> Option<Vec<tower_lsp::lsp_types::CompletionItem>> {
+  match response? {
+    CompletionResponse::Array(items) => Some(items),
+    CompletionResponse::List(list) => Some(list.items),
+  }
+}
+
+fn hover_contents_to_string(hover: &Hover) -> String {
+  match &hover.contents {
+    tower_lsp::lsp_types::HoverContents::Scalar(marked) => marked_string_to_string(marked),
+    tower_lsp::lsp_types::HoverContents::Array(items) => {
+      items.iter().map(marked_string_to_string).collect::<Vec<_>>().join("\n")
+    }
+    tower_lsp::lsp_types::HoverContents::Markup(content) => content.value.clone(),
+  }
+}
+
+fn marked_string_to_string(marked: &tower_lsp::lsp_types::MarkedString) -> String {
+  match marked {
+    tower_lsp::lsp_types::MarkedString::String(value) => value.clone(),
+    tower_lsp::lsp_types::MarkedString::LanguageString(value) => value.value.clone(),
+  }
 }
 
 /// Forwards a publishDiagnostics notification to the diagnostics channel.
