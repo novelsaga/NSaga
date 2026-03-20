@@ -23,6 +23,35 @@ pub struct MarkdownParts {
   pub has_frontmatter: bool,
 }
 
+/// Severity level for markdown parse issues.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSeverity {
+  /// Parsing cannot fully trust the source content.
+  Error,
+  /// Parsing succeeded but found a suspicious value.
+  Warning,
+}
+
+/// Diagnostic issue found while parsing markdown frontmatter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseIssue {
+  /// Severity of the issue.
+  pub severity: ParseSeverity,
+  /// Human-readable issue description.
+  pub message: String,
+  /// 1-based line number in the source document when known.
+  pub line: Option<usize>,
+}
+
+/// Parsed markdown plus any frontmatter diagnostics.
+#[derive(Debug, Clone)]
+pub struct MarkdownParseReport {
+  /// Parsed markdown parts.
+  pub parts: MarkdownParts,
+  /// Collected parse issues.
+  pub issues: Vec<ParseIssue>,
+}
+
 impl MarkdownParts {
   /// Create a new `MarkdownParts` with parsed frontmatter and body
   ///
@@ -62,52 +91,53 @@ impl MarkdownParts {
   /// ```
   #[must_use]
   pub fn parse(content: &str) -> Self {
+    Self::parse_with_issues(content).parts
+  }
+
+  /// Parse markdown content into `MarkdownParts` and collect frontmatter issues.
+  #[must_use]
+  pub fn parse_with_issues(content: &str) -> MarkdownParseReport {
     let lines: Vec<&str> = content.lines().collect();
 
-    // Check if document starts with frontmatter delimiter
     if lines.is_empty() || !lines[0].trim().starts_with("---") {
-      // No frontmatter - entire content is body
-      return Self {
-        frontmatter: json!({}),
-        body: content.to_string(),
-        has_frontmatter: false,
+      return MarkdownParseReport {
+        parts: markdown_without_frontmatter(content),
+        issues: Vec::new(),
       };
     }
 
-    // Find closing delimiter
     let closing_delimiter_idx = lines[1..]
       .iter()
       .position(|line| line.trim().starts_with("---"))
-      .map(|idx| idx + 1); // Adjust for skipped first line
+      .map(|idx| idx + 1);
 
-    if let Some(delimiter_idx) = closing_delimiter_idx {
-      // Extract frontmatter section (between delimiters)
-      let frontmatter_str = lines[1..delimiter_idx].join("\n");
-
-      // Parse YAML frontmatter to JSON
-      // Use gray_matter engine for YAML parsing similar to config module
-      let frontmatter = parse_yaml_to_json(&frontmatter_str);
-
-      // Extract body (everything after closing delimiter)
-      let body_start = delimiter_idx + 1;
-      let body = if body_start < lines.len() {
-        lines[body_start..].join("\n")
-      } else {
-        String::new()
+    let Some(delimiter_idx) = closing_delimiter_idx else {
+      return MarkdownParseReport {
+        parts: markdown_without_frontmatter(content),
+        issues: vec![ParseIssue {
+          severity: ParseSeverity::Error,
+          message: "Unterminated frontmatter: missing closing delimiter".to_string(),
+          line: Some(1),
+        }],
       };
+    };
 
-      Self {
-        frontmatter,
+    let frontmatter_lines = &lines[1..delimiter_idx];
+    let frontmatter = parse_yaml_to_json(&frontmatter_lines.join("\n"));
+    let body_start = delimiter_idx + 1;
+    let body = if body_start < lines.len() {
+      lines[body_start..].join("\n")
+    } else {
+      String::new()
+    };
+
+    MarkdownParseReport {
+      parts: Self {
+        frontmatter: frontmatter.clone(),
         body,
         has_frontmatter: true,
-      }
-    } else {
-      // Found opening delimiter but no closing - treat entire content as body
-      Self {
-        frontmatter: json!({}),
-        body: content.to_string(),
-        has_frontmatter: false,
-      }
+      },
+      issues: collect_frontmatter_issues(frontmatter_lines, &frontmatter),
     }
   }
 
@@ -241,6 +271,58 @@ impl WorkspaceDocument {
   }
 }
 
+fn markdown_without_frontmatter(content: &str) -> MarkdownParts {
+  MarkdownParts {
+    frontmatter: json!({}),
+    body: content.to_string(),
+    has_frontmatter: false,
+  }
+}
+
+fn collect_frontmatter_issues(frontmatter_lines: &[&str], frontmatter: &Value) -> Vec<ParseIssue> {
+  let mut issues = Vec::new();
+  let mut type_line = None;
+
+  for (idx, line) in frontmatter_lines.iter().enumerate() {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+      continue;
+    }
+
+    if let Some((key, _)) = trimmed.split_once(':') {
+      if key.trim().is_empty() {
+        issues.push(ParseIssue {
+          severity: ParseSeverity::Error,
+          message: format!("Malformed frontmatter line: {trimmed}"),
+          line: Some(idx + 2),
+        });
+        continue;
+      }
+
+      if key.trim() == "type" {
+        type_line = Some(idx + 2);
+      }
+      continue;
+    }
+
+    issues.push(ParseIssue {
+      severity: ParseSeverity::Error,
+      message: format!("Malformed frontmatter line: {trimmed}"),
+      line: Some(idx + 2),
+    });
+  }
+
+  if frontmatter.get("type").is_some_and(|value| !value.is_string()) {
+    issues.push(ParseIssue {
+      severity: ParseSeverity::Warning,
+      message: "Frontmatter 'type' field should be a string".to_string(),
+      line: type_line,
+    });
+  }
+
+  issues
+}
+
 /// Parse YAML string to JSON Value
 ///
 /// Uses the config crate's YAML parser (via the config crate) to parse YAML
@@ -337,6 +419,65 @@ mod tests {
 
     assert!(!parts.has_frontmatter);
     assert_eq!(parts.body, content);
+  }
+
+  #[test]
+  fn parse_with_issues_valid_frontmatter_has_no_issues() {
+    let content = "---\ntitle: Hello\ntype: article\n---\n# Body";
+    let report = MarkdownParts::parse_with_issues(content);
+
+    assert!(report.parts.has_frontmatter);
+    assert_eq!(report.parts.body, "# Body");
+    assert!(report.issues.is_empty());
+  }
+
+  #[test]
+  fn parse_with_issues_reports_unterminated_frontmatter() {
+    let content = "---\ntitle: Hello\nBody text here";
+    let report = MarkdownParts::parse_with_issues(content);
+
+    assert!(!report.parts.has_frontmatter);
+    assert_eq!(report.parts.body, content);
+    assert_eq!(report.issues.len(), 1);
+    assert_eq!(report.issues[0].severity, ParseSeverity::Error);
+    assert_eq!(
+      report.issues[0].message,
+      "Unterminated frontmatter: missing closing delimiter"
+    );
+  }
+
+  #[test]
+  fn parse_with_issues_reports_malformed_frontmatter_line() {
+    let content = "---\ntitle: Hello\nthis is not a key value pair\n---\nBody";
+    let report = MarkdownParts::parse_with_issues(content);
+
+    assert!(report.parts.has_frontmatter);
+    assert_eq!(report.parts.body, "Body");
+    assert_eq!(
+      report.parts.frontmatter.get("title").and_then(|v| v.as_str()),
+      Some("Hello")
+    );
+    assert_eq!(report.issues.len(), 1);
+    assert_eq!(report.issues[0].severity, ParseSeverity::Error);
+    assert_eq!(
+      report.issues[0].message,
+      "Malformed frontmatter line: this is not a key value pair"
+    );
+  }
+
+  #[test]
+  fn parse_with_issues_reports_non_string_explicit_type() {
+    let content = "---\ntitle: Hello\ntype: 123\n---\nBody";
+    let report = MarkdownParts::parse_with_issues(content);
+
+    assert!(report.parts.has_frontmatter);
+    assert_eq!(
+      report.parts.frontmatter.get("type").and_then(serde_json::Value::as_i64),
+      Some(123)
+    );
+    assert_eq!(report.issues.len(), 1);
+    assert_eq!(report.issues[0].severity, ParseSeverity::Warning);
+    assert_eq!(report.issues[0].message, "Frontmatter 'type' field should be a string");
   }
 
   #[test]
