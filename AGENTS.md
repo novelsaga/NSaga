@@ -1,5 +1,17 @@
 # NOVELSAGA PROJECT KNOWLEDGE BASE
 
+## Quick Start
+
+| Task                 | Command                 |
+| -------------------- | ----------------------- |
+| Install dependencies | `pnpm install`          |
+| Build Rust project   | `cargo build`           |
+| Run tests            | `cargo test`            |
+| Build everything     | `cargo xtask build-all` |
+| Format code          | `treefmt`               |
+
+---
+
 ## Golden Rules
 
 1. **Never `npm install` in subprojects** — use `pnpm install` at workspace root only.
@@ -280,19 +292,6 @@ _WHY: Automated hooks ensure all commits meet quality standards without manual i
 
 ---
 
-## Summary Checklist
-
-Before committing, verify:
-
-- [ ] `cargo clippy` passes (or will pass via hook)
-- [ ] Tests are in the source file, not separate `.test.rs`
-- [ ] TypeScript imports use `node:` prefix for built-ins
-- [ ] Bridges log to stderr, not stdout
-- [ ] State is initialized with `Initializer::init()` before use
-- [ ] Commit includes AI attribution trailer if AI-assisted
-
----
-
 ## AI-Assisted Commit Guidelines
 
 **Key Points:**
@@ -339,20 +338,20 @@ file modification timestamps.
 Co-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>
 ```
 
-### Why This Matters
+_WHY: Tracking AI assistance provides transparency for contributors, traceability for collaboration patterns, and ensures accountability — the human remains responsible for committed code quality. This also prepares for emerging open-source AI contribution policies (see Linux Kernel RFC)._
 
-_Tracking AI assistance provides:_
+---
 
-- **Transparency**: Contributors know when code was AI-assisted
-- **Traceability**: Git history shows collaboration patterns
-- **Accountability**: Human remains the commit author responsible for code quality
-- **Compliance**: Prepares for emerging open-source AI contribution policies (see Linux Kernel RFC on AI coding assistants)
+## Summary Checklist
 
-### Reference
+Before committing, verify:
 
-- Linux Kernel RFC: `Co-developed-by:` trailer for AI attribution
-- Git trailers: Any `Key: Value` format is valid (Git 2.32+)
-- GitHub: `Co-authored-by:` displayed as co-author in UI
+- [ ] `cargo clippy` passes (or will pass via hook)
+- [ ] Tests are in the source file, not separate `.test.rs`
+- [ ] TypeScript imports use `node:` prefix for built-ins
+- [ ] Bridges log to stderr, not stdout
+- [ ] State is initialized with `Initializer::init()` before use
+- [ ] Commit includes AI attribution trailer if AI-assisted
 
 Key workspace facts:
 
