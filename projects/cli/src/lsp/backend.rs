@@ -7,7 +7,7 @@ use std::{
 use novelsaga_core::{
   article::{Article, ArticleDocument},
   config::OverridableConfig,
-  document::{DocumentKind, MarkdownParts, WorkspaceDocument},
+  document::{DocumentKind, MarkdownParts, ParseSeverity, WorkspaceDocument},
   library,
   metadata::{
     MetadataEntity,
@@ -20,20 +20,21 @@ use tower_lsp::{
   Client, LanguageServer,
   jsonrpc::Result as LspResult,
   lsp_types::{
-    DeleteFilesParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentFormattingParams, ExecuteCommandParams, FileChangeType, FileEvent,
-    FileOperationFilter, FileOperationPattern, FileOperationPatternKind, FileOperationRegistrationOptions,
-    FileSystemWatcher, InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf, Position, Range,
-    Registration, RenameFilesParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextEdit, Url, WatchKind, WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
-    WorkspaceServerCapabilities,
+    CompletionOptions, CompletionParams, CompletionResponse, DeleteFilesParams, Diagnostic, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentFormattingParams, ExecuteCommandParams, FileChangeType, FileEvent, FileOperationFilter,
+    FileOperationPattern, FileOperationPatternKind, FileOperationRegistrationOptions, FileSystemWatcher, Hover,
+    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    MarkupContent, MarkupKind, MessageType, OneOf, Position, Range, Registration, RenameFilesParams,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url, WatchKind,
+    WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
   },
 };
 use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::{
-  lsp::offset_to_position,
+  lsp::{build_completion_candidates, extract_active_prefix, offset_to_position, position_to_offset},
   metadata::{
     IndexManager,
     resolver::{MetadataResolver, ResolutionContext},
@@ -393,6 +394,54 @@ impl Backend {
       state.parsed = parsed;
     }
   }
+
+  async fn publish_document_diagnostics(&self, uri: &Url, version: i32, text: &str) {
+    let report = MarkdownParts::parse_with_issues(text);
+    let diagnostics = report
+      .issues
+      .into_iter()
+      .map(|issue| Diagnostic {
+        range: Self::diagnostic_range(text, issue.line),
+        severity: Some(match issue.severity {
+          ParseSeverity::Error => DiagnosticSeverity::ERROR,
+          ParseSeverity::Warning => DiagnosticSeverity::WARNING,
+        }),
+        message: issue.message,
+        ..Diagnostic::default()
+      })
+      .collect();
+
+    self
+      .client
+      .publish_diagnostics(uri.clone(), diagnostics, Some(version))
+      .await;
+  }
+
+  fn diagnostic_range(text: &str, line: Option<usize>) -> Range {
+    let Some(line_index) = line.and_then(|line| line.checked_sub(1)) else {
+      return Range {
+        start: Position { line: 0, character: 0 },
+        end: Position { line: 0, character: 0 },
+      };
+    };
+
+    let start = Position {
+      line: u32::try_from(line_index).unwrap_or(0),
+      character: 0,
+    };
+
+    let Some(line_content) = text.lines().nth(line_index) else {
+      return Range { start, end: start };
+    };
+
+    Range {
+      start,
+      end: Position {
+        line: start.line,
+        character: u32::try_from(line_content.encode_utf16().count()).unwrap_or(0),
+      },
+    }
+  }
 }
 
 #[tower_lsp::async_trait]
@@ -420,6 +469,14 @@ impl LanguageServer for Backend {
       capabilities: ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         document_formatting_provider: Some(OneOf::Left(true)),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
+        completion_provider: Some(CompletionOptions {
+          resolve_provider: Some(false),
+          trigger_characters: None,
+          all_commit_characters: None,
+          work_done_progress_options: WorkDoneProgressOptions::default(),
+          completion_item: None,
+        }),
         execute_command_provider: Some(tower_lsp::lsp_types::ExecuteCommandOptions {
           commands: vec![
             "novelsaga/index".to_string(),
@@ -511,7 +568,7 @@ impl LanguageServer for Backend {
         uri.clone(),
         DocumentState {
           version,
-          text,
+          text: Arc::clone(&text),
           kind,
           parsed: Err("Document parsing in progress".to_string()),
           disk_changed: false,
@@ -520,6 +577,7 @@ impl LanguageServer for Backend {
     }
 
     self.refresh_document_parse(&uri).await;
+    self.publish_document_diagnostics(&uri, version, text.as_ref()).await;
 
     self
       .client
@@ -558,11 +616,17 @@ impl LanguageServer for Backend {
       }
 
       self.refresh_document_parse(&uri).await;
+      self.publish_document_diagnostics(&uri, version, text.as_ref()).await;
     }
   }
 
   async fn did_close(&self, params: DidCloseTextDocumentParams) {
     eprintln!("Document closed: {}", params.text_document.uri);
+
+    self
+      .client
+      .publish_diagnostics(params.text_document.uri.clone(), Vec::new(), None)
+      .await;
 
     let mut document_store = self.document_store.write().await;
     document_store.remove(&params.text_document.uri);
@@ -676,6 +740,58 @@ impl LanguageServer for Backend {
       },
       new_text: formatted.content_ref().to_string(),
     }]))
+  }
+
+  async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
+    let uri = params.text_document_position_params.text_document.uri;
+    let position = params.text_document_position_params.position;
+
+    let document_store = self.document_store.read().await;
+    let Some(state) = document_store.get(&uri) else {
+      return Ok(None);
+    };
+
+    if position_to_offset(state.text.as_ref(), position).is_none() {
+      return Ok(None);
+    }
+
+    let hover = match &state.parsed {
+      Ok(WorkspaceDocument::Metadata(entity)) => Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+          kind: MarkupKind::Markdown,
+          value: entity.to_hover_markdown(),
+        }),
+        range: None,
+      }),
+      Ok(WorkspaceDocument::Article(_)) | Err(_) => None,
+    };
+
+    Ok(hover)
+  }
+
+  async fn completion(&self, params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
+    let uri = params.text_document_position.text_document.uri;
+    let position = params.text_document_position.position;
+
+    let document_store = self.document_store.read().await;
+    let Some(state) = document_store.get(&uri) else {
+      return Ok(Some(CompletionResponse::Array(Vec::new())));
+    };
+
+    let Some(cursor_offset) = position_to_offset(state.text.as_ref(), position) else {
+      return Ok(Some(CompletionResponse::Array(Vec::new())));
+    };
+    let prefix = extract_active_prefix(state.text.as_ref(), cursor_offset);
+    drop(document_store);
+
+    let Some(index_manager) = self.index_manager().await else {
+      return Ok(Some(CompletionResponse::Array(Vec::new())));
+    };
+
+    let entities = index_manager.list_all().unwrap_or_default();
+    Ok(Some(CompletionResponse::Array(build_completion_candidates(
+      &entities, &prefix,
+    ))))
   }
 
   async fn execute_command(&self, params: ExecuteCommandParams) -> LspResult<Option<serde_json::Value>> {
