@@ -22,11 +22,11 @@ use tower_lsp::{
     ClientCapabilities, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
     DidChangeWatchedFilesClientCapabilities, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentFormattingParams, DynamicRegistrationClientCapabilities, FileChangeType,
-    FileEvent, FormattingOptions, Hover, HoverParams, InitializeParams, InitializeResult, OneOf, Position,
-    PublishDiagnosticsParams, ServerInfo, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextDocumentSyncCapability,
-    TextDocumentSyncClientCapabilities, TextDocumentSyncKind, TextEdit, Url, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceClientCapabilities,
+    FileEvent, FormattingOptions, Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    OneOf, Position, PublishDiagnosticsParams, ServerInfo, TextDocumentClientCapabilities,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
+    TextDocumentSyncCapability, TextDocumentSyncClientCapabilities, TextDocumentSyncKind, TextEdit, Url,
+    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
     notification::{DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument},
     request::{
       Completion, Formatting, HoverRequest, RegisterCapability, Request as LspRequest, WorkDoneProgressCreate,
@@ -677,6 +677,17 @@ fn assert_core_capabilities(result: &InitializeResult) -> Result<()> {
   match &result.server_info {
     Some(ServerInfo { name, .. }) if name.contains("NovelSaga") => {}
     other => bail!("expected NovelSaga server_info, got {other:?}"),
+  }
+
+  // Task 6: hover and completion capabilities
+  match result.capabilities.hover_provider {
+    Some(HoverProviderCapability::Simple(true)) => {}
+    ref other => bail!("expected hover provider enabled, got {other:?}"),
+  }
+
+  match &result.capabilities.completion_provider {
+    Some(options) if options.trigger_characters.is_none() => {}
+    ref other => bail!("expected completion provider with no trigger characters, got {other:?}"),
   }
 
   Ok(())
