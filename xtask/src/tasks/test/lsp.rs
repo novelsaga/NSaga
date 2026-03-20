@@ -69,6 +69,10 @@ pub fn run_e2e_test() -> Result<()> {
     run_lsp_didchangewatchedfiles_e2e_test_impl(&binary).await?;
     run_lsp_hover_e2e_test_impl(&binary).await?;
     run_lsp_completion_e2e_test_impl(&binary).await?;
+    completion_updates_after_watched_metadata_change(&binary).await?;
+    completion_returns_empty_when_index_manager_missing(&binary).await?;
+    hover_and_completion_do_not_panic_on_parse_error(&binary).await?;
+    formatting_regression_stays_green_after_p3_changes(&binary).await?;
     run_lsp_diagnostics_e2e_test_impl(&binary).await?;
     run_lsp_diagnostics_clear_e2e_test_impl(&binary).await?;
     Ok::<(), anyhow::Error>(())
@@ -462,6 +466,192 @@ async fn run_lsp_diagnostics_clear_e2e_test_impl(binary: &Path) -> Result<()> {
   shutdown_server(&server, pid_file.as_deref()).await?;
   drop(server);
   println!("  ✅ diagnostics clear passed");
+  Ok(())
+}
+
+async fn completion_updates_after_watched_metadata_change(binary: &Path) -> Result<()> {
+  println!("• completion_updates_after_watched_metadata_change");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let metadata_path = workspace
+    .path()
+    .join("book")
+    .join("metadata")
+    .join("characters")
+    .join("hero-delta.md");
+  let article_path = workspace.path().join("chapter-02.md");
+  std::fs::create_dir_all(metadata_path.parent().context("Missing metadata parent")?)
+    .context("Failed to create metadata parent")?;
+  std::fs::write(&article_path, "Hero").context("Failed to write article file")?;
+
+  let initial = "---\ntitle: Hero Delta\ntype: character\n---\nBody";
+  let updated = "---\ntitle: Hero Delta Prime\ntype: character\n---\nBody";
+  std::fs::write(&metadata_path, initial).context("Failed to write initial metadata")?;
+
+  let (server, initialize_result, watched_registration_ready, pid_file, _diagnostics_rx) =
+    start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+  wait_for_watched_registration(&watched_registration_ready, 5).await?;
+
+  notify_watched_files(&server, vec![file_event(&metadata_path, FileChangeType::CREATED)?]).await?;
+  sleep(Duration::from_millis(200)).await;
+
+  let article_uri = file_url(&article_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: article_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: "Hero".to_string(),
+      },
+    })
+    .await;
+
+  let before = request_completion(&server, article_uri.clone(), Position { line: 0, character: 4 }).await?;
+  let before_items = completion_items(before).ok_or_else(|| anyhow!("initial completion returned None"))?;
+  assert!(
+    before_items.iter().any(|item| item.label == "Hero Delta"),
+    "completion should include original watched metadata title, got: {before_items:?}"
+  );
+
+  std::fs::write(&metadata_path, updated).context("Failed to update metadata")?;
+  notify_watched_files(&server, vec![file_event(&metadata_path, FileChangeType::CHANGED)?]).await?;
+  sleep(Duration::from_millis(200)).await;
+
+  let after = request_completion(&server, article_uri, Position { line: 0, character: 4 }).await?;
+  let after_items = completion_items(after).ok_or_else(|| anyhow!("updated completion returned None"))?;
+  assert!(
+    after_items.iter().any(|item| item.label == "Hero Delta Prime"),
+    "completion should reflect watched metadata change, got: {after_items:?}"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ completion watched update passed");
+  Ok(())
+}
+
+async fn completion_returns_empty_when_index_manager_missing(binary: &Path) -> Result<()> {
+  println!("• completion_returns_empty_when_index_manager_missing");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let article_path = workspace.path().join("chapter-03.md");
+  std::fs::write(&article_path, "Hero").context("Failed to write article file")?;
+
+  let (server, initialize_result, _, pid_file, _diagnostics_rx) = start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+
+  let article_uri = file_url(&article_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: article_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: "Hero".to_string(),
+      },
+    })
+    .await;
+
+  let completion = request_completion(&server, article_uri, Position { line: 0, character: 4 }).await?;
+  let items = completion_items(completion).ok_or_else(|| anyhow!("completion returned None"))?;
+  assert!(
+    items.is_empty(),
+    "completion should degrade to empty when index_manager is unavailable, got: {items:?}"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ completion empty on missing index manager passed");
+  Ok(())
+}
+
+async fn hover_and_completion_do_not_panic_on_parse_error(binary: &Path) -> Result<()> {
+  println!("• hover_and_completion_do_not_panic_on_parse_error");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let metadata_path = workspace
+    .path()
+    .join("book")
+    .join("metadata")
+    .join("characters")
+    .join("broken-hover.md");
+  std::fs::create_dir_all(metadata_path.parent().context("Missing metadata parent")?)
+    .context("Failed to create metadata parent")?;
+
+  let broken_text = "---\ntitle: Broken Hover\nthis is not valid frontmatter\n---\nBody";
+  std::fs::write(&metadata_path, broken_text).context("Failed to write broken metadata")?;
+
+  let (server, initialize_result, _, pid_file, _diagnostics_rx) = start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+
+  let metadata_uri = file_url(&metadata_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: metadata_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: broken_text.to_string(),
+      },
+    })
+    .await;
+
+  let hover = request_hover(&server, metadata_uri.clone(), Position { line: 1, character: 2 }).await?;
+  assert!(
+    hover.is_none(),
+    "hover on parse error should return None, got: {hover:?}"
+  );
+
+  let completion = request_completion(&server, metadata_uri, Position { line: 1, character: 6 }).await?;
+  let items = completion_items(completion).ok_or_else(|| anyhow!("completion returned None"))?;
+  assert!(
+    items.is_empty(),
+    "completion on parse error should return empty result, got: {items:?}"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ parse-error hover/completion safety passed");
+  Ok(())
+}
+
+async fn formatting_regression_stays_green_after_p3_changes(binary: &Path) -> Result<()> {
+  println!("• formatting_regression_stays_green_after_p3_changes");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let article_path = workspace.path().join("format-regression.md");
+  let source = "你好world\n\n第二段test";
+  std::fs::write(&article_path, source).context("Failed to write formatting regression source")?;
+
+  let (server, initialize_result, _, pid_file, _diagnostics_rx) = start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+
+  let article_uri = file_url(&article_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: article_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: source.to_string(),
+      },
+    })
+    .await;
+
+  let edit = expect_single_edit(
+    request_formatting(&server, article_uri).await?,
+    "formatting regression after P3",
+  )?;
+  assert_eq!(
+    edit.new_text, "    你好 world\n\n    第二段 test",
+    "formatting behavior should remain unchanged after P3 changes"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ formatting regression passed");
   Ok(())
 }
 
