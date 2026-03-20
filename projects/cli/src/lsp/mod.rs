@@ -1,6 +1,9 @@
 mod backend;
+mod position;
 
 pub use backend::Backend;
+#[allow(unused_imports)]
+pub use position::{offset_to_position, position_to_offset};
 use tower_lsp::LspService;
 
 /// 启动 LSP 服务器

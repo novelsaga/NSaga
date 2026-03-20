@@ -32,9 +32,12 @@ use tower_lsp::{
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-use crate::metadata::{
-  IndexManager,
-  resolver::{MetadataResolver, ResolutionContext},
+use crate::{
+  lsp::offset_to_position,
+  metadata::{
+    IndexManager,
+    resolver::{MetadataResolver, ResolutionContext},
+  },
 };
 
 type DocumentStore = Arc<RwLock<HashMap<Url, DocumentState>>>;
@@ -662,19 +665,14 @@ impl LanguageServer for Backend {
       &config.as_ref().unwrap_or(&OverridableConfig::default()).fmt,
     );
 
-    // 计算文档的结束位置
-    let line_count = u32::try_from(content.lines().count()).unwrap_or(0);
-    let last_line = content.lines().last().unwrap_or("");
-    let last_char = u32::try_from(last_line.chars().count()).unwrap_or(0);
+    // 计算文档的结束位置 (使用 UTF-16 编码)
+    let end_position = offset_to_position(content, content.len()).unwrap_or(Position { line: 0, character: 0 });
 
     // 返回替换整个文档的 TextEdit
     Ok(Some(vec![TextEdit {
       range: Range {
         start: Position { line: 0, character: 0 },
-        end: Position {
-          line: line_count.saturating_sub(1),
-          character: last_char,
-        },
+        end: end_position,
       },
       new_text: formatted.content_ref().to_string(),
     }]))
