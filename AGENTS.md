@@ -11,6 +11,7 @@
 7. **Use `thiserror` for libraries, `anyhow` for apps** — structured errors vs. propagation.
 8. **Use TDD for development** — write failing test first, then minimal code to pass, then refactor.
 9. **Use git-worktree for large changes** — prevent accidental data loss on extensive refactors.
+10. **Disclose AI assistance in commits** — add `Co-authored-by:` trailer when using AI tools.
 
 ---
 
@@ -288,6 +289,70 @@ Before committing, verify:
 - [ ] TypeScript imports use `node:` prefix for built-ins
 - [ ] Bridges log to stderr, not stdout
 - [ ] State is initialized with `Initializer::init()` before use
+- [ ] Commit includes AI attribution trailer if AI-assisted
+
+---
+
+## AI-Assisted Commit Guidelines
+
+**Key Points:**
+
+- Always disclose AI assistance in commit messages
+- Use `Co-authored-by:` trailer for AI collaboration attribution
+- Keep attribution format consistent and traceable
+- Human remains responsible for the committed code
+
+### Attribution Format
+
+Add at the end of commit message (before any sign-offs):
+
+```
+Co-authored-by: <AI-Tool-Name> <ai@example.com>
+```
+
+**Examples:**
+
+```
+Co-authored-by: Claude <noreply@anthropic.com>
+Co-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>
+```
+
+### Full Template
+
+```
+<type>: <short summary>
+
+<body - what and why>
+
+Co-authored-by: <AI-Name> <ai-email>
+```
+
+**Example:**
+
+```
+feat: add metadata caching for LSP
+
+Implement in-memory cache for entity metadata to reduce
+disk I/O during LSP operations. Cache invalidation uses
+file modification timestamps.
+
+Co-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>
+```
+
+### Why This Matters
+
+_Tracking AI assistance provides:_
+
+- **Transparency**: Contributors know when code was AI-assisted
+- **Traceability**: Git history shows collaboration patterns
+- **Accountability**: Human remains the commit author responsible for code quality
+- **Compliance**: Prepares for emerging open-source AI contribution policies (see Linux Kernel RFC on AI coding assistants)
+
+### Reference
+
+- Linux Kernel RFC: `Co-developed-by:` trailer for AI attribution
+- Git trailers: Any `Key: Value` format is valid (Git 2.32+)
+- GitHub: `Co-authored-by:` displayed as co-author in UI
 
 Key workspace facts:
 
@@ -298,17 +363,20 @@ Key workspace facts:
 - **Development**: TDD workflow, git-worktree for large changes
 
 <!-- OCR:START -->
+
 ## Open Code Review Instructions
 
 These instructions are for AI assistants handling code review in this project.
 
 Always open `.ocr/skills/SKILL.md` when the request:
+
 - Asks for code review, PR review, or feedback on changes
 - Mentions "review my code" or similar phrases
 - Wants multi-perspective analysis of code quality
 - Asks to map, organize, or navigate a large changeset
 
 Use `.ocr/skills/SKILL.md` to learn:
+
 - How to run the 8-phase review workflow
 - How to generate a Code Review Map for large changesets
 - Available reviewer personas and their focus areas
