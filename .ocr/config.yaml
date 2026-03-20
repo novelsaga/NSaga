@@ -1,0 +1,105 @@
+# Open Code Review Configuration
+# This file is installed to .ocr/config.yaml and customized per-project.
+# Context here is injected into every review request.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROJECT CONTEXT
+# ─────────────────────────────────────────────────────────────────────────────
+# Injected into ALL review requests. Keep it tight—focus on what reviewers
+# genuinely need to know that isn't obvious from the code itself.
+
+context: |
+  Tech stack: Rust (Edition 2024, nightly), TypeScript, Node.js
+  Architecture: Multi-package workspace with Rust core + JS bridges
+  Key patterns:
+    - State management via Initializer::init() before get()
+    - node: prefix for built-ins in JS
+    - Tests colocated in source files (#[cfg(test)])
+    - thiserror for libs, anyhow for apps
+  Critical constraints:
+    - stdout reserved for JSON-RPC in bridges (use stderr)
+    - Sled KV store at .cache/novelsaga/sled (shared between CLI and LSP)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONTEXT DISCOVERY
+# ─────────────────────────────────────────────────────────────────────────────
+# Files to read during Phase 1 (Context Discovery). OCR merges these into
+# the review context automatically.
+
+context_discovery:
+  # OpenSpec integration - pull project context and active specs
+  openspec:
+    enabled: true
+    config: "openspec/config.yaml"      # Project conventions from OpenSpec
+    # config: "openspec/project.md"     # Use this for legacy OpenSpec projects
+    specs: "openspec/specs/**/*.md"     # Merged specs for architectural context
+    active_changes: "openspec/changes/**/*.md"  # In-flight change proposals
+
+  # AI assistant configuration files (auto-detected)
+  references:
+    - "AGENTS.md"
+    - "CLAUDE.md"
+    - ".cursorrules"
+    - ".windsurfrules"
+    - ".github/copilot-instructions.md"
+    - "CONTRIBUTING.md"
+    - "openspec/AGENTS.md"  # OpenSpec instructions (if present)
+
+  # Additional project-specific files to include
+  # additional:
+  #   - "docs/ARCHITECTURE.md"
+  #   - "docs/API_STANDARDS.md"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REVIEW RULES
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-severity rules for reviewers. Only add what's not obvious.
+
+rules:
+  critical:
+    - Uninitialized state access (calling get() before init())
+    - stdout pollution in bridge code
+    - npm install in subprojects (must use pnpm at root)
+  important:
+    - Missing node: prefix for built-ins
+    - Separate .test.rs files (tests must be colocated)
+    - Silent error handling (catch without action)
+  consider:
+    - Import order violations (std → external → crate)
+    - Naming convention inconsistencies
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REVIEWER TEAM
+# ─────────────────────────────────────────────────────────────────────────────
+
+default_team:
+  principal: 2    # Holistic architecture review
+  quality: 2      # Code quality and maintainability
+  # security: 1   # Auto-added for auth/API/data changes
+  # testing: 1    # Auto-added for logic-heavy changes
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CODE REVIEW MAP
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration for the /ocr:map command.
+# Increase agent redundancy for large codebases to improve accuracy.
+# Note: Map is a standalone tool for humans; review command works independently.
+
+code-review-map:
+  agents:
+    flow_analysts: 2         # Number of Flow Analyst agents (1-10, default: 2)
+    requirements_mappers: 2  # Number of Requirements Mapper agents (1-10, default: 2)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OUTPUT & WORKFLOW
+# ─────────────────────────────────────────────────────────────────────────────
+
+output:
+  session_dir: ".ocr/sessions"
+
+discourse:
+  enabled: true   # Set false or use --quick to skip reviewer debate phase
+
+github:
+  auto_prompt_post: false
+  comment_format: "single"  # "single" or "inline"
