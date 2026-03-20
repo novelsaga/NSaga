@@ -921,7 +921,10 @@ async fn request_completion(server: &LspServer, uri: Url, position: Position) ->
         text_document: TextDocumentIdentifier { uri },
         position,
       },
-      context: None,
+      context: Some(tower_lsp::lsp_types::CompletionContext {
+        trigger_kind: tower_lsp::lsp_types::CompletionTriggerKind::INVOKED,
+        trigger_character: None,
+      }),
       work_done_progress_params: WorkDoneProgressParams::default(),
       partial_result_params: Default::default(),
     })
