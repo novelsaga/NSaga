@@ -1,8 +1,8 @@
 {
   "pnpmDeps": {
-    "x86_64-linux": "sha256-Y0T3TBNrjSXtQ769vgJ2vODBKdXdg/skPjvSZhddDG0=",
-    "aarch64-linux": "sha256-Y0T3TBNrjSXtQ769vgJ2vODBKdXdg/skPjvSZhddDG0=",
-    "x86_64-darwin": "sha256-Y0T3TBNrjSXtQ769vgJ2vODBKdXdg/skPjvSZhddDG0=",
-    "aarch64-darwin": "sha256-Y0T3TBNrjSXtQ769vgJ2vODBKdXdg/skPjvSZhddDG0="
+    "x86_64-linux": "sha256-qauQz4DsR9F/efzrj6bU5aqhEZvi2/4SLS05VNvW5J8=",
+    "aarch64-linux": "sha256-qauQz4DsR9F/efzrj6bU5aqhEZvi2/4SLS05VNvW5J8=",
+    "x86_64-darwin": "sha256-qauQz4DsR9F/efzrj6bU5aqhEZvi2/4SLS05VNvW5J8=",
+    "aarch64-darwin": "sha256-qauQz4DsR9F/efzrj6bU5aqhEZvi2/4SLS05VNvW5J8="
   }
 }
