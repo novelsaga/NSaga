@@ -13,21 +13,25 @@ use serde_json::Value;
 use tempfile::TempDir;
 use tokio::{
   runtime::Runtime,
-  sync::mpsc::Receiver,
-  time::{Duration, sleep},
+  sync::mpsc::{Receiver, channel},
+  time::{Duration, sleep, timeout},
 };
 use tower_lsp::{
   jsonrpc::{self, ErrorCode},
   lsp_types::{
-    ClientCapabilities, DidChangeTextDocumentParams, DidChangeWatchedFilesClientCapabilities,
-    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-    DynamicRegistrationClientCapabilities, FileChangeType, FileEvent, FormattingOptions, InitializeParams,
-    InitializeResult, OneOf, ServerInfo, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentSyncCapability, TextDocumentSyncClientCapabilities,
-    TextDocumentSyncKind, TextEdit, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-    WorkspaceClientCapabilities,
+    ClientCapabilities, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesClientCapabilities, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentFormattingParams, DynamicRegistrationClientCapabilities, FileChangeType,
+    FileEvent, FormattingOptions, Hover, HoverParams, InitializeParams, InitializeResult, OneOf, Position,
+    PublishDiagnosticsParams, ServerInfo, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncClientCapabilities, TextDocumentSyncKind, TextEdit, Url, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceClientCapabilities,
     notification::{DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument},
-    request::{Formatting, RegisterCapability, Request as LspRequest, WorkDoneProgressCreate, WorkspaceConfiguration},
+    request::{
+      Completion, Formatting, HoverRequest, RegisterCapability, Request as LspRequest, WorkDoneProgressCreate,
+      WorkspaceConfiguration,
+    },
   },
 };
 
@@ -63,6 +67,7 @@ pub fn run_e2e_test() -> Result<()> {
   runtime.block_on(async {
     run_lsp_e2e_test_impl(&binary).await?;
     run_lsp_didchangewatchedfiles_e2e_test_impl(&binary).await?;
+    run_lsp_hover_completion_diagnostics_e2e_test_impl(&binary).await?;
     Ok::<(), anyhow::Error>(())
   })?;
 
@@ -80,7 +85,7 @@ async fn run_lsp_e2e_test_impl(binary: &Path) -> Result<()> {
 
   std::fs::write(&article_path, original_text).context("Failed to write initial article.md")?;
 
-  let (server, initialize_result, _, pid_file) = start_server(binary, workspace.path()).await?;
+  let (server, initialize_result, _, pid_file, _diagnostics_rx) = start_server(binary, workspace.path()).await?;
   assert_core_capabilities(&initialize_result)?;
 
   let article_uri = file_url(&article_path)?;
@@ -161,7 +166,8 @@ async fn run_lsp_didchangewatchedfiles_e2e_test_impl(binary: &Path) -> Result<()
     .context("Failed to create watched metadata parent directory")?;
   let index_dir = expected_index_dir_for_workspace(workspace.path());
 
-  let (server, _, watched_registration_ready, pid_file) = start_server(binary, workspace.path()).await?;
+  let (server, _, watched_registration_ready, pid_file, _diagnostics_rx) =
+    start_server(binary, workspace.path()).await?;
   wait_for_watched_registration(&watched_registration_ready, 5).await?;
 
   std::fs::write(&watched1, "---\ntitle: Watched File 1\n---\n\nbody").context("Failed to write watched1.md")?;
@@ -231,6 +237,60 @@ async fn run_lsp_didchangewatchedfiles_e2e_test_impl(binary: &Path) -> Result<()
   Ok(())
 }
 
+async fn run_lsp_hover_completion_diagnostics_e2e_test_impl(binary: &Path) -> Result<()> {
+  println!("• run_lsp_hover_completion_diagnostics_e2e_test");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let article_path = workspace.path().join("article.md");
+  let original_text = "你好world\n\n第二段test";
+
+  std::fs::write(&article_path, original_text).context("Failed to write initial article.md")?;
+
+  let (server, initialize_result, _, pid_file, mut diagnostics_rx) = start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+
+  let article_uri = file_url(&article_path)?;
+
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: article_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: original_text.to_string(),
+      },
+    })
+    .await;
+
+  let test_position = Position { line: 0, character: 2 };
+
+  let hover_err = request_hover(&server, article_uri.clone(), test_position)
+    .await
+    .expect_err("hover should fail since backend doesn't implement it yet");
+  assert!(
+    hover_err.to_string().contains("MethodNotFound"),
+    "expected MethodNotFound error for hover, got: {hover_err}"
+  );
+  println!("  ℹ️  hover correctly returns MethodNotFound");
+
+  let completion_err = request_completion(&server, article_uri.clone(), test_position)
+    .await
+    .expect_err("completion should fail since backend doesn't implement it yet");
+  assert!(
+    completion_err.to_string().contains("MethodNotFound"),
+    "expected MethodNotFound error for completion, got: {completion_err}"
+  );
+  println!("  ℹ️  completion correctly returns MethodNotFound");
+
+  let diagnostics = collect_diagnostics_notifications(&mut diagnostics_rx, Duration::from_secs(1)).await?;
+  println!("  ℹ️  diagnostics collected: {} items", diagnostics.len());
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ hover, completion, diagnostics harness test passed");
+  Ok(())
+}
+
 fn build_runtime() -> Result<Runtime> {
   tokio::runtime::Builder::new_current_thread()
     .enable_all()
@@ -265,15 +325,23 @@ fn expected_index_dir_for_workspace(workspace_root: &Path) -> PathBuf {
 async fn start_server(
   binary: &Path,
   workspace_root: &Path,
-) -> Result<(LspServer, InitializeResult, Arc<AtomicBool>, Option<PathBuf>)> {
+) -> Result<(
+  LspServer,
+  InitializeResult,
+  Arc<AtomicBool>,
+  Option<PathBuf>,
+  Receiver<PublishDiagnosticsParams>,
+)> {
   let (program, args, pid_file) = lsp_launch_command(binary, workspace_root)?;
   let (server, rx) = LspServer::new(program, args);
   let watched_registration_ready = Arc::new(AtomicBool::new(false));
+  let (diagnostics_tx, diagnostics_rx) = channel::<PublishDiagnosticsParams>(100);
 
   tokio::spawn(drive_server_messages(
     server.clone(),
     rx,
     watched_registration_ready.clone(),
+    diagnostics_tx,
   ));
 
   let initialize_result = server
@@ -282,17 +350,26 @@ async fn start_server(
     .map_err(|error| jsonrpc_error("initialize request failed", error))?;
 
   server.initialized().await;
-  Ok((server, initialize_result, watched_registration_ready, pid_file))
+  Ok((
+    server,
+    initialize_result,
+    watched_registration_ready,
+    pid_file,
+    diagnostics_rx,
+  ))
 }
 
 async fn drive_server_messages(
   server: LspServer,
   mut rx: Receiver<ServerMessage>,
   watched_registration_ready: Arc<AtomicBool>,
+  diagnostics_tx: tokio::sync::mpsc::Sender<PublishDiagnosticsParams>,
 ) {
   while let Some(message) = rx.recv().await {
     match message {
-      ServerMessage::Notification(_) => {}
+      ServerMessage::Notification(notification) => {
+        forward_diagnostics_notification(&notification.method, notification.params.as_ref(), &diagnostics_tx);
+      }
       ServerMessage::Request(request) => {
         let Some(id) = request.id().cloned() else {
           continue;
@@ -447,6 +524,68 @@ async fn request_formatting(server: &LspServer, uri: Url) -> Result<Option<Vec<T
     })
     .await
     .map_err(|error| jsonrpc_error("formatting request failed", error))
+}
+
+async fn request_hover(server: &LspServer, uri: Url, position: Position) -> Result<Option<Hover>> {
+  server
+    .send_request::<HoverRequest>(HoverParams {
+      text_document_position_params: TextDocumentPositionParams {
+        text_document: TextDocumentIdentifier { uri },
+        position,
+      },
+      work_done_progress_params: WorkDoneProgressParams::default(),
+    })
+    .await
+    .map_err(|error| jsonrpc_error("hover request failed", error))
+}
+
+async fn request_completion(server: &LspServer, uri: Url, position: Position) -> Result<Option<CompletionResponse>> {
+  server
+    .send_request::<Completion>(CompletionParams {
+      text_document_position: TextDocumentPositionParams {
+        text_document: TextDocumentIdentifier { uri },
+        position,
+      },
+      context: None,
+      work_done_progress_params: WorkDoneProgressParams::default(),
+      partial_result_params: Default::default(),
+    })
+    .await
+    .map_err(|error| jsonrpc_error("completion request failed", error))
+}
+
+async fn collect_diagnostics_notifications(
+  diagnostics_rx: &mut Receiver<PublishDiagnosticsParams>,
+  timeout_duration: Duration,
+) -> Result<Vec<PublishDiagnosticsParams>> {
+  let mut diagnostics = Vec::new();
+  let deadline = tokio::time::Instant::now() + timeout_duration;
+
+  while tokio::time::Instant::now() < deadline {
+    match timeout(Duration::from_millis(100), diagnostics_rx.recv()).await {
+      Ok(Some(diag)) => diagnostics.push(diag),
+      Ok(None) => break,
+      Err(_) => continue,
+    }
+  }
+
+  Ok(diagnostics)
+}
+
+/// Forwards a publishDiagnostics notification to the diagnostics channel.
+/// Extracted as a helper for testability.
+fn forward_diagnostics_notification(
+  method: &str,
+  params: Option<&Value>,
+  diagnostics_tx: &tokio::sync::mpsc::Sender<PublishDiagnosticsParams>,
+) {
+  if method == "textDocument/publishDiagnostics" {
+    if let Some(params) = params {
+      if let Ok(diag_params) = serde_json::from_value::<PublishDiagnosticsParams>(params.clone()) {
+        let _ = diagnostics_tx.try_send(diag_params);
+      }
+    }
+  }
 }
 
 fn expect_single_edit(edits: Option<Vec<TextEdit>>, context: &str) -> Result<TextEdit> {
@@ -699,4 +838,45 @@ fn jsonrpc_error(context: &str, error: jsonrpc::Error) -> anyhow::Error {
     error.message,
     error.data
   )
+}
+
+#[cfg(test)]
+mod tests {
+  use tokio::sync::mpsc::channel;
+
+  use super::*;
+
+  struct TestNotification {
+    method: String,
+    params: Option<Value>,
+  }
+
+  #[tokio::test]
+  async fn test_diagnostics_forwarding() {
+    let (diagnostics_tx, mut diagnostics_rx) = channel::<PublishDiagnosticsParams>(10);
+
+    let notification = TestNotification {
+      method: "textDocument/publishDiagnostics".to_string(),
+      params: Some(serde_json::json!({
+        "uri": "file:///test.md",
+        "version": 1,
+        "diagnostics": [{
+          "range": {
+            "start": {"line": 0, "character": 0},
+            "end": {"line": 0, "character": 1}
+          },
+          "message": "test diagnostic"
+        }]
+      })),
+    };
+
+    forward_diagnostics_notification(&notification.method, notification.params.as_ref(), &diagnostics_tx);
+
+    let received = timeout(Duration::from_secs(1), diagnostics_rx.recv()).await;
+    assert!(received.is_ok());
+    let params = received.unwrap().expect("should receive diagnostics");
+    assert_eq!(params.uri.as_str(), "file:///test.md");
+    assert_eq!(params.diagnostics.len(), 1);
+    assert_eq!(params.diagnostics[0].message, "test diagnostic");
+  }
 }
