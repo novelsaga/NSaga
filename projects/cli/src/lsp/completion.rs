@@ -111,13 +111,18 @@ fn entity_label(entity: &MetadataEntity) -> String {
     .map_or_else(|| entity.id.clone(), ToString::to_string)
 }
 
+/// Match priority per plan specification:
+/// 0 = label prefix match (highest)
+/// 1 = id prefix match
+/// 2 = label substring match
+/// 3 = id substring match (lowest)
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct CandidateSortKey {
   match_priority: u8,
   match_index: usize,
-  normalized_label: String,
-  namespace: String,
+  label: String,
   type_: String,
+  namespace: String,
   id: String,
 }
 
@@ -131,22 +136,24 @@ impl Candidate {
     let label = entity_label(entity);
     let normalized_label = normalize_for_match(&label);
     let normalized_id = normalize_for_match(&entity.id);
-    let normalized_title = entity
-      .get_field("title")
-      .and_then(|value| value.as_str())
-      .map(normalize_for_match);
-    let normalized_name = entity
-      .get_field("name")
-      .and_then(|value| value.as_str())
-      .map(normalize_for_match);
 
-    let match_quality = MatchQuality::for_fields(
-      normalized_prefix,
-      [&normalized_label, &normalized_id]
-        .into_iter()
-        .chain(normalized_name.iter())
-        .chain(normalized_title.iter()),
-    )?;
+    // Check match quality separately for label vs id
+    let label_match = check_match_quality(normalized_prefix, &normalized_label);
+    let id_match = check_match_quality(normalized_prefix, &normalized_id);
+
+    // Determine best match per plan precedence: label prefix > id prefix > label substring > id substring
+    let (match_priority, match_index) = match (label_match, id_match) {
+      // Label prefix match takes highest priority (0)
+      (Some((0, idx)), _) => (0, idx),
+      // Id prefix match is next (1)
+      (None | Some((_, _)), Some((0, idx))) => (1, idx),
+      // Label substring match is next (2)
+      (Some((1, idx)), None | Some((_, _))) => (2, idx),
+      // Id substring match is lowest (3)
+      (None, Some((1, idx))) => (3, idx),
+      // All other cases (shouldn't happen with valid inputs)
+      _ => return None,
+    };
 
     Some(Self {
       item: CompletionItem {
@@ -157,41 +164,27 @@ impl Candidate {
         ..CompletionItem::default()
       },
       sort_key: CandidateSortKey {
-        match_priority: match_quality.priority,
-        match_index: match_quality.index,
-        normalized_label,
-        namespace: entity.namespace.clone(),
+        match_priority,
+        match_index,
+        label,
         type_: entity.type_.clone(),
+        namespace: entity.namespace.clone(),
         id: entity.id.clone(),
       },
     })
   }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct MatchQuality {
-  priority: u8,
-  index: usize,
-}
-
-impl MatchQuality {
-  fn for_fields<'a>(prefix: &str, fields: impl IntoIterator<Item = &'a String>) -> Option<Self> {
-    if prefix.is_empty() {
-      return Some(Self { priority: 0, index: 0 });
-    }
-
-    fields
-      .into_iter()
-      .filter_map(|field| Self::for_field(prefix, field))
-      .min_by_key(|quality| (quality.priority, quality.index))
+/// Returns (priority, index) where priority: 0=prefix, 1=substring
+fn check_match_quality(normalized_prefix: &str, field: &str) -> Option<(u8, usize)> {
+  if normalized_prefix.is_empty() {
+    return Some((0, 0));
   }
 
-  fn for_field(prefix: &str, field: &str) -> Option<Self> {
-    if field.starts_with(prefix) {
-      Some(Self { priority: 0, index: 0 })
-    } else {
-      field.find(prefix).map(|index| Self { priority: 1, index })
-    }
+  if field.starts_with(normalized_prefix) {
+    Some((0, 0)) // prefix match
+  } else {
+    field.find(normalized_prefix).map(|idx| (1, idx)) // substring match
   }
 }
 
