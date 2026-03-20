@@ -1,7 +1,10 @@
 mod backend;
+mod completion;
 mod position;
 
 pub use backend::Backend;
+#[allow(unused_imports)]
+pub use completion::{build_completion_candidates, extract_active_prefix};
 #[allow(unused_imports)]
 pub use position::{offset_to_position, position_to_offset};
 use tower_lsp::LspService;

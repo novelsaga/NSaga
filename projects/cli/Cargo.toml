@@ -23,6 +23,7 @@
   either = "1.9"
   flume = "0.11"
   gray_matter = "0.3"
+  jieba-rs = "0.8"
   moka = { version = "0.12", features = ["future"] }
   notify = "6.1"
   novelsaga-core = { path = "../core" }
