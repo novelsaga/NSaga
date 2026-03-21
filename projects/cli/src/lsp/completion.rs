@@ -119,7 +119,6 @@ fn entity_label(entity: &MetadataEntity) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct CandidateSortKey {
   match_priority: u8,
-  match_index: usize,
   label: String,
   type_: String,
   namespace: String,
@@ -142,15 +141,15 @@ impl Candidate {
     let id_match = check_match_quality(normalized_prefix, &normalized_id);
 
     // Determine best match per plan precedence: label prefix > id prefix > label substring > id substring
-    let (match_priority, match_index) = match (label_match, id_match) {
+    let match_priority = match (label_match, id_match) {
       // Label prefix match takes highest priority (0)
-      (Some((0, idx)), _) => (0, idx),
+      (Some((0, _)), _) => 0,
       // Id prefix match is next (1)
-      (None | Some((_, _)), Some((0, idx))) => (1, idx),
+      (None | Some((_, _)), Some((0, _))) => 1,
       // Label substring match is next (2)
-      (Some((1, idx)), None | Some((_, _))) => (2, idx),
+      (Some((1, _)), None | Some((_, _))) => 2,
       // Id substring match is lowest (3)
-      (None, Some((1, idx))) => (3, idx),
+      (None, Some((1, _))) => 3,
       // All other cases (shouldn't happen with valid inputs)
       _ => return None,
     };
@@ -165,7 +164,6 @@ impl Candidate {
       },
       sort_key: CandidateSortKey {
         match_priority,
-        match_index,
         label,
         type_: entity.type_.clone(),
         namespace: entity.namespace.clone(),
@@ -237,6 +235,19 @@ mod tests {
         .iter()
         .all(|item| item.kind == Some(CompletionItemKind::REFERENCE))
     );
+  }
+
+  #[test]
+  fn rank_candidates_uses_label_tie_break_for_same_priority_matches() {
+    let entities = vec![
+      entity("alpha-hero", "character", "cast", Some("Alpha Hero")),
+      entity("beta-hero", "character", "cast", Some("Beta Hero")),
+    ];
+
+    let items = build_completion_candidates(&entities, "hero");
+    let labels: Vec<_> = items.iter().map(|item| item.label.as_str()).collect();
+
+    assert_eq!(labels, vec!["Alpha Hero", "Beta Hero"]);
   }
 
   #[test]

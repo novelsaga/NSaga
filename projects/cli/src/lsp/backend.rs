@@ -20,14 +20,15 @@ use tower_lsp::{
   Client, LanguageServer,
   jsonrpc::Result as LspResult,
   lsp_types::{
-    CompletionOptions, CompletionParams, CompletionResponse, DeleteFilesParams, Diagnostic, DiagnosticSeverity,
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, ExecuteCommandParams, FileChangeType, FileEvent, FileOperationFilter,
-    FileOperationPattern, FileOperationPatternKind, FileOperationRegistrationOptions, FileSystemWatcher, Hover,
-    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    MarkupContent, MarkupKind, MessageType, OneOf, Position, Range, Registration, RenameFilesParams,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url, WatchKind,
-    WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities, WorkspaceServerCapabilities,
+    CompletionContext, CompletionOptions, CompletionParams, CompletionResponse, CompletionTriggerKind,
+    DeleteFilesParams, Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams, ExecuteCommandParams,
+    FileChangeType, FileEvent, FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
+    FileOperationRegistrationOptions, FileSystemWatcher, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, InitializedParams, MarkupContent, MarkupKind, MessageType, OneOf, Position,
+    Range, Registration, RenameFilesParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Url, WatchKind, WorkDoneProgressOptions, WorkspaceFileOperationsServerCapabilities,
+    WorkspaceServerCapabilities,
   },
 };
 use uuid::Uuid;
@@ -214,6 +215,10 @@ impl Backend {
     self.index_manager.read().await.clone()
   }
 
+  fn should_return_empty_completion(context: Option<&CompletionContext>) -> bool {
+    context.is_some_and(|ctx| ctx.trigger_kind != CompletionTriggerKind::INVOKED)
+  }
+
   async fn mark_document_disk_changed(&self, path: &Path) -> bool {
     let normalized_path = Self::normalize_path(path);
     let mut document_store = self.document_store.write().await;
@@ -253,8 +258,8 @@ impl Backend {
       }
     };
 
-    let parts = MarkdownParts::parse(&content);
-    let mut entity = match MetadataEntity::try_from((parts, path.as_path(), workspace_root.as_path())) {
+    let report = MarkdownParts::parse_with_issues(&content);
+    let mut entity = match MetadataEntity::try_from((report.parts, path.as_path(), workspace_root.as_path())) {
       Ok(entity) => entity,
       Err(error) => {
         eprintln!("Failed to parse metadata file {}: {error}", path.display());
@@ -350,22 +355,12 @@ impl Backend {
       Ok(path) => {
         let report = MarkdownParts::parse_with_issues(text.as_ref());
         match kind {
-          DocumentKind::Metadata => {
-            if let Some(issue) = report
-              .issues
-              .iter()
-              .find(|issue| issue.severity == ParseSeverity::Error)
-            {
-              return (kind, Err(issue.message.clone()));
+          DocumentKind::Metadata => match workspace_root {
+            Some(root) => {
+              MetadataEntity::try_from((report.parts, path.as_path(), root)).map(WorkspaceDocument::Metadata)
             }
-
-            match workspace_root {
-              Some(root) => {
-                MetadataEntity::try_from((report.parts, path.as_path(), root)).map(WorkspaceDocument::Metadata)
-              }
-              None => Err(format!("Workspace root is required to parse metadata document: {uri}")),
-            }
-          }
+            None => Err(format!("Workspace root is required to parse metadata document: {uri}")),
+          },
           DocumentKind::Article => Ok(WorkspaceDocument::Article(ArticleDocument::from_parts(report.parts))),
         }
       }
@@ -774,6 +769,10 @@ impl LanguageServer for Backend {
   }
 
   async fn completion(&self, params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
+    if Self::should_return_empty_completion(params.context.as_ref()) {
+      return Ok(Some(CompletionResponse::Array(Vec::new())));
+    }
+
     let uri = params.text_document_position.text_document.uri;
     let position = params.text_document_position.position;
 
@@ -982,5 +981,47 @@ impl LanguageServer for Backend {
         Ok(None)
       }
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::{path::Path, sync::Arc};
+
+  use novelsaga_core::document::{DocumentKind, WorkspaceDocument};
+  use tower_lsp::lsp_types::{CompletionContext, CompletionTriggerKind, Url};
+
+  use super::Backend;
+
+  #[test]
+  fn parse_document_keeps_metadata_when_frontmatter_has_error_issue() {
+    let uri = Url::parse("file:///workspace/metadata/characters/hero.md").expect("valid uri");
+    let text: Arc<str> = Arc::from("---\ntype: character\nmalformed frontmatter line\n---\n# Hero\n");
+
+    let (kind, parsed) = Backend::parse_document(&uri, &text, Some(Path::new("/workspace")));
+
+    assert_eq!(kind, DocumentKind::Metadata);
+    assert!(matches!(parsed, Ok(WorkspaceDocument::Metadata(_))));
+  }
+
+  #[test]
+  fn completion_returns_empty_for_trigger_character_requests() {
+    let context = CompletionContext {
+      trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+      trigger_character: Some("#".to_string()),
+    };
+
+    assert!(Backend::should_return_empty_completion(Some(&context)));
+  }
+
+  #[test]
+  fn completion_keeps_manual_for_invoked_and_missing_context() {
+    let invoked = CompletionContext {
+      trigger_kind: CompletionTriggerKind::INVOKED,
+      trigger_character: None,
+    };
+
+    assert!(!Backend::should_return_empty_completion(Some(&invoked)));
+    assert!(!Backend::should_return_empty_completion(None));
   }
 }
