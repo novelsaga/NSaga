@@ -69,9 +69,11 @@ pub fn run_e2e_test() -> Result<()> {
     run_lsp_didchangewatchedfiles_e2e_test_impl(&binary).await?;
     run_lsp_hover_e2e_test_impl(&binary).await?;
     run_lsp_completion_e2e_test_impl(&binary).await?;
+    completion_returns_empty_for_trigger_character_requests(&binary).await?;
     completion_updates_after_watched_metadata_change(&binary).await?;
     completion_returns_empty_when_index_manager_missing(&binary).await?;
     run_lsp_metadata_completion_e2e_test_impl(&binary).await?;
+    run_lsp_metadata_document_completion_e2e_test_impl(&binary).await?;
     hover_and_completion_do_not_panic_on_parse_error(&binary).await?;
     formatting_regression_stays_green_after_p3_changes(&binary).await?;
     run_lsp_diagnostics_e2e_test_impl(&binary).await?;
@@ -544,6 +546,70 @@ async fn completion_updates_after_watched_metadata_change(binary: &Path) -> Resu
   Ok(())
 }
 
+async fn completion_returns_empty_for_trigger_character_requests(binary: &Path) -> Result<()> {
+  println!("• completion_returns_empty_for_trigger_character_requests");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let metadata_dir = workspace.path().join("book").join("metadata").join("characters");
+  let article_path = workspace.path().join("chapter-trigger.md");
+  std::fs::create_dir_all(&metadata_dir).context("Failed to create metadata directory")?;
+
+  std::fs::write(
+    metadata_dir.join("hero-trigger.md"),
+    "---\ntitle: Hero Trigger\ntype: character\n---\nTrigger body",
+  )
+  .context("Failed to write hero-trigger metadata")?;
+  std::fs::write(&article_path, "Hero").context("Failed to write chapter-trigger.md")?;
+
+  let (server, initialize_result, watched_registration_ready, pid_file, _diagnostics_rx) =
+    start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+  wait_for_watched_registration(&watched_registration_ready, 5).await?;
+
+  notify_watched_files(
+    &server,
+    vec![file_event(
+      &metadata_dir.join("hero-trigger.md"),
+      FileChangeType::CREATED,
+    )?],
+  )
+  .await?;
+  sleep(Duration::from_millis(200)).await;
+
+  let article_uri = file_url(&article_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: article_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: "Hero".to_string(),
+      },
+    })
+    .await;
+
+  let manual_completion = request_completion(&server, article_uri.clone(), Position { line: 0, character: 4 }).await?;
+  let manual_items = completion_items(manual_completion).ok_or_else(|| anyhow!("completion request returned None"))?;
+  assert!(
+    !manual_items.is_empty(),
+    "manual INVOKED completion should return items before trigger-character assertion"
+  );
+
+  let trigger_completion =
+    request_completion_with_trigger_character(&server, article_uri, Position { line: 0, character: 4 }, "#").await?;
+  let trigger_items =
+    completion_items(trigger_completion).ok_or_else(|| anyhow!("completion request returned None"))?;
+  assert!(
+    trigger_items.is_empty(),
+    "trigger-character completion should return empty list, got: {trigger_items:?}"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ trigger-character completion returns empty passed");
+  Ok(())
+}
+
 async fn run_lsp_metadata_completion_e2e_test_impl(binary: &Path) -> Result<()> {
   println!("• run_lsp_metadata_completion_e2e_test");
 
@@ -627,6 +693,64 @@ async fn run_lsp_metadata_completion_e2e_test_impl(binary: &Path) -> Result<()> 
   Ok(())
 }
 
+async fn run_lsp_metadata_document_completion_e2e_test_impl(binary: &Path) -> Result<()> {
+  println!("• run_lsp_metadata_document_completion_e2e_test");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let metadata_dir = workspace.path().join("book").join("metadata").join("characters");
+  let hero_alpha_path = metadata_dir.join("hero-alpha.md");
+  let hero_beta_path = metadata_dir.join("hero-beta.md");
+  std::fs::create_dir_all(&metadata_dir).context("Failed to create metadata directory")?;
+
+  let hero_alpha_text = "---\ntitle: Hero Alpha\ntype: character\n---\nHero";
+  let hero_beta_text = "---\ntitle: Hero Beta\ntype: character\n---\nBeta body";
+  std::fs::write(&hero_alpha_path, hero_alpha_text).context("Failed to write hero-alpha metadata")?;
+  std::fs::write(&hero_beta_path, hero_beta_text).context("Failed to write hero-beta metadata")?;
+
+  let (server, initialize_result, watched_registration_ready, pid_file, _diagnostics_rx) =
+    start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+  wait_for_watched_registration(&watched_registration_ready, 5).await?;
+
+  notify_watched_files(
+    &server,
+    vec![
+      file_event(&hero_alpha_path, FileChangeType::CREATED)?,
+      file_event(&hero_beta_path, FileChangeType::CREATED)?,
+    ],
+  )
+  .await?;
+  sleep(Duration::from_millis(300)).await;
+
+  let metadata_uri = file_url(&hero_alpha_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: metadata_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: hero_alpha_text.to_string(),
+      },
+    })
+    .await;
+
+  let completion = request_completion(&server, metadata_uri, Position { line: 4, character: 4 }).await?;
+  let items = completion_items(completion).ok_or_else(|| anyhow!("completion request returned None"))?;
+  assert!(
+    items.iter().any(|item| {
+      item.label == "Hero Alpha"
+        && item.insert_text.as_deref() == Some("Hero Alpha")
+        && item.detail.as_deref() == Some("character · book")
+    }),
+    "metadata-document completion should include Hero Alpha with expected shape, got: {items:?}"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ metadata-document completion e2e passed");
+  Ok(())
+}
+
 async fn completion_returns_empty_when_index_manager_missing(binary: &Path) -> Result<()> {
   println!("• completion_returns_empty_when_index_manager_missing");
 
@@ -696,7 +820,10 @@ async fn hover_and_completion_do_not_panic_on_parse_error(binary: &Path) -> Resu
     .await;
 
   let hover = request_hover(&server, metadata_uri.clone(), Position { line: 1, character: 3 }).await?;
-  assert!(hover.is_none(), "hover should return None on parse error document");
+  assert!(
+    hover.is_some(),
+    "hover should remain available for recoverable frontmatter issues"
+  );
 
   let completion = request_completion(&server, metadata_uri, Position { line: 1, character: 3 }).await?;
   let items = completion_items(completion).ok_or_else(|| anyhow!("completion request returned None"))?;
@@ -1020,16 +1147,49 @@ async fn request_hover(server: &LspServer, uri: Url, position: Position) -> Resu
 }
 
 async fn request_completion(server: &LspServer, uri: Url, position: Position) -> Result<Option<CompletionResponse>> {
+  request_completion_with_context(
+    server,
+    uri,
+    position,
+    Some(CompletionContext {
+      trigger_kind: CompletionTriggerKind::INVOKED,
+      trigger_character: None,
+    }),
+  )
+  .await
+}
+
+async fn request_completion_with_trigger_character(
+  server: &LspServer,
+  uri: Url,
+  position: Position,
+  trigger_character: &str,
+) -> Result<Option<CompletionResponse>> {
+  request_completion_with_context(
+    server,
+    uri,
+    position,
+    Some(CompletionContext {
+      trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+      trigger_character: Some(trigger_character.to_string()),
+    }),
+  )
+  .await
+}
+
+async fn request_completion_with_context(
+  server: &LspServer,
+  uri: Url,
+  position: Position,
+  context: Option<CompletionContext>,
+) -> Result<Option<CompletionResponse>> {
   server
     .send_request::<Completion>(CompletionParams {
       text_document_position: TextDocumentPositionParams {
         text_document: TextDocumentIdentifier { uri },
         position,
       },
-      context: Some(CompletionContext {
-        trigger_kind: CompletionTriggerKind::INVOKED,
-        trigger_character: None,
-      }),
+      context,
       work_done_progress_params: WorkDoneProgressParams::default(),
       partial_result_params: Default::default(),
     })
