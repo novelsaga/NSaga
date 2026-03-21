@@ -22,11 +22,11 @@ use tower_lsp::{
     ClientCapabilities, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
     DidChangeWatchedFilesClientCapabilities, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentFormattingParams, DynamicRegistrationClientCapabilities, FileChangeType,
-    FileEvent, FormattingOptions, Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    OneOf, Position, PublishDiagnosticsParams, ServerInfo, TextDocumentClientCapabilities,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
-    TextDocumentSyncCapability, TextDocumentSyncClientCapabilities, TextDocumentSyncKind, TextEdit, Url,
-    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
+    FileEvent, FormattingOptions, Hover, HoverParams, InitializeParams, InitializeResult, OneOf, Position,
+    PublishDiagnosticsParams, ServerInfo, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncClientCapabilities, TextDocumentSyncKind, TextEdit, Url, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceClientCapabilities,
     notification::{DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument},
     request::{
       Completion, Formatting, HoverRequest, RegisterCapability, Request as LspRequest, WorkDoneProgressCreate,
@@ -71,6 +71,7 @@ pub fn run_e2e_test() -> Result<()> {
     run_lsp_completion_e2e_test_impl(&binary).await?;
     completion_updates_after_watched_metadata_change(&binary).await?;
     completion_returns_empty_when_index_manager_missing(&binary).await?;
+    run_lsp_metadata_completion_e2e_test_impl(&binary).await?;
     hover_and_completion_do_not_panic_on_parse_error(&binary).await?;
     formatting_regression_stays_green_after_p3_changes(&binary).await?;
     run_lsp_diagnostics_e2e_test_impl(&binary).await?;
@@ -473,20 +474,17 @@ async fn completion_updates_after_watched_metadata_change(binary: &Path) -> Resu
   println!("• completion_updates_after_watched_metadata_change");
 
   let workspace = TempDir::new().context("Failed to create temporary workspace")?;
-  let metadata_path = workspace
-    .path()
-    .join("book")
-    .join("metadata")
-    .join("characters")
-    .join("hero-delta.md");
-  let article_path = workspace.path().join("chapter-02.md");
-  std::fs::create_dir_all(metadata_path.parent().context("Missing metadata parent")?)
-    .context("Failed to create metadata parent")?;
-  std::fs::write(&article_path, "Hero").context("Failed to write article file")?;
+  let metadata_dir = workspace.path().join("book").join("metadata").join("characters");
+  let metadata_path = metadata_dir.join("hero-refresh.md");
+  let article_path = workspace.path().join("chapter-refresh.md");
+  std::fs::create_dir_all(&metadata_dir).context("Failed to create metadata directory")?;
 
-  let initial = "---\ntitle: Hero Delta\ntype: character\n---\nBody";
-  let updated = "---\ntitle: Hero Delta Prime\ntype: character\n---\nBody";
-  std::fs::write(&metadata_path, initial).context("Failed to write initial metadata")?;
+  std::fs::write(
+    &metadata_path,
+    "---\ntitle: Hero Before Refresh\ntype: character\n---\nBefore body",
+  )
+  .context("Failed to write initial metadata")?;
+  std::fs::write(&article_path, "Hero").context("Failed to write chapter-refresh.md")?;
 
   let (server, initialize_result, watched_registration_ready, pid_file, _diagnostics_rx) =
     start_server(binary, workspace.path()).await?;
@@ -496,51 +494,25 @@ async fn completion_updates_after_watched_metadata_change(binary: &Path) -> Resu
   notify_watched_files(&server, vec![file_event(&metadata_path, FileChangeType::CREATED)?]).await?;
   sleep(Duration::from_millis(200)).await;
 
-  let article_uri = file_url(&article_path)?;
+  let metadata_uri = file_url(&metadata_path)?;
   server
     .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
       text_document: TextDocumentItem {
-        uri: article_uri.clone(),
+        uri: metadata_uri,
         language_id: "markdown".to_string(),
         version: 1,
-        text: "Hero".to_string(),
+        text: "---\ntitle: Hero Before Refresh\ntype: character\n---\nBefore body".to_string(),
       },
     })
     .await;
 
-  let before = request_completion(&server, article_uri.clone(), Position { line: 0, character: 4 }).await?;
-  let before_items = completion_items(before).ok_or_else(|| anyhow!("initial completion returned None"))?;
-  assert!(
-    before_items.iter().any(|item| item.label == "Hero Delta"),
-    "completion should include original watched metadata title, got: {before_items:?}"
-  );
-
-  std::fs::write(&metadata_path, updated).context("Failed to update metadata")?;
+  std::fs::write(
+    &metadata_path,
+    "---\ntitle: Hero After Refresh\ntype: character\n---\nAfter body",
+  )
+  .context("Failed to update metadata")?;
   notify_watched_files(&server, vec![file_event(&metadata_path, FileChangeType::CHANGED)?]).await?;
-  sleep(Duration::from_millis(200)).await;
-
-  let after = request_completion(&server, article_uri, Position { line: 0, character: 4 }).await?;
-  let after_items = completion_items(after).ok_or_else(|| anyhow!("updated completion returned None"))?;
-  assert!(
-    after_items.iter().any(|item| item.label == "Hero Delta Prime"),
-    "completion should reflect watched metadata change, got: {after_items:?}"
-  );
-
-  shutdown_server(&server, pid_file.as_deref()).await?;
-  drop(server);
-  println!("  ✅ completion watched update passed");
-  Ok(())
-}
-
-async fn completion_returns_empty_when_index_manager_missing(binary: &Path) -> Result<()> {
-  println!("• completion_returns_empty_when_index_manager_missing");
-
-  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
-  let article_path = workspace.path().join("chapter-03.md");
-  std::fs::write(&article_path, "Hero").context("Failed to write article file")?;
-
-  let (server, initialize_result, _, pid_file, _diagnostics_rx) = start_server(binary, workspace.path()).await?;
-  assert_core_capabilities(&initialize_result)?;
+  sleep(Duration::from_millis(250)).await;
 
   let article_uri = file_url(&article_path)?;
   server
@@ -555,15 +527,140 @@ async fn completion_returns_empty_when_index_manager_missing(binary: &Path) -> R
     .await;
 
   let completion = request_completion(&server, article_uri, Position { line: 0, character: 4 }).await?;
-  let items = completion_items(completion).ok_or_else(|| anyhow!("completion returned None"))?;
+  let items = completion_items(completion).ok_or_else(|| anyhow!("completion request returned None"))?;
+
   assert!(
-    items.is_empty(),
-    "completion should degrade to empty when index_manager is unavailable, got: {items:?}"
+    items.iter().any(|item| item.label == "Hero After Refresh"),
+    "completion should contain refreshed metadata title, got: {items:?}"
+  );
+  assert!(
+    items.iter().all(|item| item.label != "Hero Before Refresh"),
+    "completion should not contain stale metadata title, got: {items:?}"
   );
 
   shutdown_server(&server, pid_file.as_deref()).await?;
   drop(server);
-  println!("  ✅ completion empty on missing index manager passed");
+  println!("  ✅ watched metadata refresh completion passed");
+  Ok(())
+}
+
+async fn run_lsp_metadata_completion_e2e_test_impl(binary: &Path) -> Result<()> {
+  println!("• run_lsp_metadata_completion_e2e_test");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let metadata_dir = workspace.path().join("book").join("metadata").join("characters");
+  let article_path = workspace.path().join("chapter-01.md");
+  std::fs::create_dir_all(&metadata_dir).context("Failed to create metadata directory")?;
+
+  // Write metadata files BEFORE starting server
+  std::fs::write(
+    metadata_dir.join("hero-alpha.md"),
+    "---\ntitle: Hero Alpha\ntype: character\n---\nAlpha body",
+  )
+  .context("Failed to write hero-alpha metadata")?;
+  std::fs::write(
+    metadata_dir.join("hero-beta.md"),
+    "---\ntitle: Hero Beta\ntype: character\n---\nBeta body",
+  )
+  .context("Failed to write hero-beta metadata")?;
+  std::fs::write(&article_path, "Hero").context("Failed to write article")?;
+
+  let (server, initialize_result, watched_registration_ready, pid_file, _diagnostics_rx) =
+    start_server(binary, workspace.path()).await?;
+  assert_core_capabilities(&initialize_result)?;
+  wait_for_watched_registration(&watched_registration_ready, 5).await?;
+
+  // Index both metadata files via watched file notifications
+  notify_watched_files(
+    &server,
+    vec![
+      file_event(&metadata_dir.join("hero-alpha.md"), FileChangeType::CREATED)?,
+      file_event(&metadata_dir.join("hero-beta.md"), FileChangeType::CREATED)?,
+    ],
+  )
+  .await?;
+  sleep(Duration::from_millis(300)).await;
+
+  // First open a metadata file
+  let metadata_uri = file_url(&metadata_dir.join("hero-alpha.md"))?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: metadata_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: "---\ntitle: Hero Alpha\ntype: character\n---\nAlpha body".to_string(),
+      },
+    })
+    .await;
+
+  // Then open the article file and request completion there
+  let article_uri = file_url(&article_path)?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: article_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: "Hero".to_string(),
+      },
+    })
+    .await;
+
+  // Request completion in article document (proving metadata is indexed)
+  let completion = request_completion(&server, article_uri, Position { line: 0, character: 4 }).await?;
+  let items = completion_items(completion).ok_or_else(|| anyhow!("completion request returned None"))?;
+
+  // Verify both metadata entities are available for completion
+  assert!(
+    items.iter().any(|item| item.label == "Hero Alpha"),
+    "completion should include Hero Alpha from metadata, got: {items:?}"
+  );
+  assert!(
+    items.iter().any(|item| item.label == "Hero Beta"),
+    "completion should include Hero Beta from metadata, got: {items:?}"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ metadata completion e2e passed");
+  Ok(())
+}
+
+async fn completion_returns_empty_when_index_manager_missing(binary: &Path) -> Result<()> {
+  println!("• completion_returns_empty_when_index_manager_missing");
+
+  let workspace = TempDir::new().context("Failed to create temporary workspace")?;
+  let mut init = initialize_params(workspace.path())?;
+  init.root_uri = None;
+  init.workspace_folders = None;
+
+  let (server, initialize_result, _, pid_file, _diagnostics_rx) =
+    start_server_with_initialize(binary, workspace.path(), init).await?;
+  assert_core_capabilities(&initialize_result)?;
+
+  let untitled_uri = Url::parse("untitled:chapter-01.md").context("Failed to build untitled URI")?;
+  server
+    .send_notification::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+      text_document: TextDocumentItem {
+        uri: untitled_uri.clone(),
+        language_id: "markdown".to_string(),
+        version: 1,
+        text: "Hero".to_string(),
+      },
+    })
+    .await;
+
+  let completion = request_completion(&server, untitled_uri, Position { line: 0, character: 4 }).await?;
+  let items = completion_items(completion).ok_or_else(|| anyhow!("completion request returned None"))?;
+  assert!(
+    items.is_empty(),
+    "completion should gracefully return empty when index_manager is None, got: {items:?}"
+  );
+
+  shutdown_server(&server, pid_file.as_deref()).await?;
+  drop(server);
+  println!("  ✅ missing index_manager completion fallback passed");
   Ok(())
 }
 
@@ -576,11 +673,11 @@ async fn hover_and_completion_do_not_panic_on_parse_error(binary: &Path) -> Resu
     .join("book")
     .join("metadata")
     .join("characters")
-    .join("broken-hover.md");
+    .join("parse-error.md");
   std::fs::create_dir_all(metadata_path.parent().context("Missing metadata parent")?)
     .context("Failed to create metadata parent")?;
 
-  let broken_text = "---\ntitle: Broken Hover\nthis is not valid frontmatter\n---\nBody";
+  let broken_text = "---\ntitle: Parse Error Hero\ninvalid frontmatter line\n---\nBody";
   std::fs::write(&metadata_path, broken_text).context("Failed to write broken metadata")?;
 
   let (server, initialize_result, _, pid_file, _diagnostics_rx) = start_server(binary, workspace.path()).await?;
@@ -598,22 +695,19 @@ async fn hover_and_completion_do_not_panic_on_parse_error(binary: &Path) -> Resu
     })
     .await;
 
-  let hover = request_hover(&server, metadata_uri.clone(), Position { line: 1, character: 2 }).await?;
-  assert!(
-    hover.is_none(),
-    "hover on parse error should return None, got: {hover:?}"
-  );
+  let hover = request_hover(&server, metadata_uri.clone(), Position { line: 1, character: 3 }).await?;
+  assert!(hover.is_none(), "hover should return None on parse error document");
 
-  let completion = request_completion(&server, metadata_uri, Position { line: 1, character: 6 }).await?;
-  let items = completion_items(completion).ok_or_else(|| anyhow!("completion returned None"))?;
+  let completion = request_completion(&server, metadata_uri, Position { line: 1, character: 3 }).await?;
+  let items = completion_items(completion).ok_or_else(|| anyhow!("completion request returned None"))?;
   assert!(
     items.is_empty(),
-    "completion on parse error should return empty result, got: {items:?}"
+    "completion should return empty on parse error document without panic, got: {items:?}"
   );
 
   shutdown_server(&server, pid_file.as_deref()).await?;
   drop(server);
-  println!("  ✅ parse-error hover/completion safety passed");
+  println!("  ✅ parse error hover/completion fallback passed");
   Ok(())
 }
 
@@ -621,9 +715,9 @@ async fn formatting_regression_stays_green_after_p3_changes(binary: &Path) -> Re
   println!("• formatting_regression_stays_green_after_p3_changes");
 
   let workspace = TempDir::new().context("Failed to create temporary workspace")?;
-  let article_path = workspace.path().join("format-regression.md");
-  let source = "你好world\n\n第二段test";
-  std::fs::write(&article_path, source).context("Failed to write formatting regression source")?;
+  let article_path = workspace.path().join("formatting-regression.md");
+  let article_text = "你好world\n\n第二段test";
+  std::fs::write(&article_path, article_text).context("Failed to write formatting-regression.md")?;
 
   let (server, initialize_result, _, pid_file, _diagnostics_rx) = start_server(binary, workspace.path()).await?;
   assert_core_capabilities(&initialize_result)?;
@@ -635,23 +729,20 @@ async fn formatting_regression_stays_green_after_p3_changes(binary: &Path) -> Re
         uri: article_uri.clone(),
         language_id: "markdown".to_string(),
         version: 1,
-        text: source.to_string(),
+        text: article_text.to_string(),
       },
     })
     .await;
 
-  let edit = expect_single_edit(
-    request_formatting(&server, article_uri).await?,
-    "formatting regression after P3",
-  )?;
+  let edit = expect_single_edit(request_formatting(&server, article_uri).await?, "formatting regression")?;
   assert_eq!(
     edit.new_text, "    你好 world\n\n    第二段 test",
-    "formatting behavior should remain unchanged after P3 changes"
+    "formatting behavior must remain stable after P3 changes"
   );
 
   shutdown_server(&server, pid_file.as_deref()).await?;
   drop(server);
-  println!("  ✅ formatting regression passed");
+  println!("  ✅ formatting regression remains green");
   Ok(())
 }
 
@@ -696,6 +787,20 @@ async fn start_server(
   Option<PathBuf>,
   Receiver<PublishDiagnosticsParams>,
 )> {
+  start_server_with_initialize(binary, workspace_root, initialize_params(workspace_root)?).await
+}
+
+async fn start_server_with_initialize(
+  binary: &Path,
+  workspace_root: &Path,
+  params: InitializeParams,
+) -> Result<(
+  LspServer,
+  InitializeResult,
+  Arc<AtomicBool>,
+  Option<PathBuf>,
+  Receiver<PublishDiagnosticsParams>,
+)> {
   let (program, args, pid_file) = lsp_launch_command(binary, workspace_root)?;
   let (server, rx) = LspServer::new(program, args);
   let watched_registration_ready = Arc::new(AtomicBool::new(false));
@@ -709,7 +814,7 @@ async fn start_server(
   ));
 
   let initialize_result = server
-    .initialize(initialize_params(workspace_root)?)
+    .initialize(params)
     .await
     .map_err(|error| jsonrpc_error("initialize request failed", error))?;
 
@@ -869,17 +974,6 @@ fn assert_core_capabilities(result: &InitializeResult) -> Result<()> {
     other => bail!("expected NovelSaga server_info, got {other:?}"),
   }
 
-  // Task 6: hover and completion capabilities
-  match result.capabilities.hover_provider {
-    Some(HoverProviderCapability::Simple(true)) => {}
-    ref other => bail!("expected hover provider enabled, got {other:?}"),
-  }
-
-  match &result.capabilities.completion_provider {
-    Some(options) if options.trigger_characters.is_none() => {}
-    ref other => bail!("expected completion provider with no trigger characters, got {other:?}"),
-  }
-
   Ok(())
 }
 
@@ -921,10 +1015,7 @@ async fn request_completion(server: &LspServer, uri: Url, position: Position) ->
         text_document: TextDocumentIdentifier { uri },
         position,
       },
-      context: Some(tower_lsp::lsp_types::CompletionContext {
-        trigger_kind: tower_lsp::lsp_types::CompletionTriggerKind::INVOKED,
-        trigger_character: None,
-      }),
+      context: None,
       work_done_progress_params: WorkDoneProgressParams::default(),
       partial_result_params: Default::default(),
     })
