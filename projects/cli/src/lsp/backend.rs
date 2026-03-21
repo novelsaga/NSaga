@@ -219,6 +219,21 @@ impl Backend {
     context.is_some_and(|ctx| ctx.trigger_kind != CompletionTriggerKind::INVOKED)
   }
 
+  fn completion_entities_or_empty<T, E>(list_all_result: Result<Vec<T>, E>) -> (Vec<T>, Option<String>)
+  where
+    E: std::fmt::Display,
+  {
+    match list_all_result {
+      Ok(entities) => (entities, None),
+      Err(error) => (
+        Vec::new(),
+        Some(format!(
+          "Failed to list metadata entities for completion: {error}. Returning empty completion items."
+        )),
+      ),
+    }
+  }
+
   async fn mark_document_disk_changed(&self, path: &Path) -> bool {
     let normalized_path = Self::normalize_path(path);
     let mut document_store = self.document_store.write().await;
@@ -795,7 +810,10 @@ impl LanguageServer for Backend {
       return Ok(Some(CompletionResponse::Array(Vec::new())));
     };
 
-    let entities = index_manager.list_all().unwrap_or_default();
+    let (entities, maybe_warning) = Self::completion_entities_or_empty(index_manager.list_all());
+    if let Some(warning) = maybe_warning {
+      self.client.log_message(MessageType::WARNING, warning).await;
+    }
     Ok(Some(CompletionResponse::Array(build_completion_candidates(
       &entities, &prefix,
     ))))
@@ -1023,5 +1041,16 @@ mod tests {
 
     assert!(!Backend::should_return_empty_completion(Some(&invoked)));
     assert!(!Backend::should_return_empty_completion(None));
+  }
+
+  #[test]
+  fn completion_entities_or_empty_returns_warning_on_list_error() {
+    let (entities, warning) =
+      Backend::completion_entities_or_empty(Result::<Vec<&str>, &str>::Err("index unavailable"));
+
+    assert!(entities.is_empty());
+    let warning = warning.expect("warning should be emitted for completion index list error");
+    assert!(warning.contains("Failed to list metadata entities for completion"));
+    assert!(warning.contains("index unavailable"));
   }
 }
