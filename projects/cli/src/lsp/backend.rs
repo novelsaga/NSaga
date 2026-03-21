@@ -234,7 +234,7 @@ impl Backend {
   }
 
   async fn upsert_metadata_from_disk(&self, path: PathBuf) {
-    self.mark_document_disk_changed(&path).await;
+    let _ = self.mark_document_disk_changed(&path).await;
 
     let Some(index_manager) = self.index_manager().await else {
       return;
@@ -269,7 +269,7 @@ impl Backend {
   }
 
   async fn remove_metadata_by_path(&self, path: &Path) {
-    self.mark_document_disk_changed(path).await;
+    let _ = self.mark_document_disk_changed(path).await;
 
     let Some(index_manager) = self.index_manager().await else {
       return;
@@ -300,6 +300,9 @@ impl Backend {
   }
 
   async fn handle_metadata_rename(&self, old_path: PathBuf, new_path: PathBuf) {
+    let _ = self.mark_document_disk_changed(&old_path).await;
+    let _ = self.mark_document_disk_changed(&new_path).await;
+
     self.remove_metadata_by_path(&old_path).await;
     self.upsert_metadata_from_disk(new_path).await;
   }
@@ -342,30 +345,30 @@ impl Backend {
     workspace_root: Option<&Path>,
   ) -> (DocumentKind, Result<WorkspaceDocument, String>) {
     let kind = Self::classify_document(uri);
-    let report = MarkdownParts::parse_with_issues(text.as_ref());
-    if report
-      .issues
-      .iter()
-      .any(|issue| matches!(issue.severity, ParseSeverity::Error))
-    {
-      let messages = report
-        .issues
-        .iter()
-        .filter(|issue| matches!(issue.severity, ParseSeverity::Error))
-        .map(|issue| issue.message.as_str())
-        .collect::<Vec<_>>()
-        .join("; ");
-      return (kind, Err(messages));
-    }
 
     let parsed = match Self::document_path_from_url(uri) {
-      Ok(path) => match kind {
-        DocumentKind::Metadata => match workspace_root {
-          Some(root) => MetadataEntity::try_from((report.parts, path.as_path(), root)).map(WorkspaceDocument::Metadata),
-          None => Err(format!("Workspace root is required to parse metadata document: {uri}")),
-        },
-        DocumentKind::Article => Ok(WorkspaceDocument::Article(ArticleDocument::from_parts(report.parts))),
-      },
+      Ok(path) => {
+        let report = MarkdownParts::parse_with_issues(text.as_ref());
+        match kind {
+          DocumentKind::Metadata => {
+            if let Some(issue) = report
+              .issues
+              .iter()
+              .find(|issue| issue.severity == ParseSeverity::Error)
+            {
+              return (kind, Err(issue.message.clone()));
+            }
+
+            match workspace_root {
+              Some(root) => {
+                MetadataEntity::try_from((report.parts, path.as_path(), root)).map(WorkspaceDocument::Metadata)
+              }
+              None => Err(format!("Workspace root is required to parse metadata document: {uri}")),
+            }
+          }
+          DocumentKind::Article => Ok(WorkspaceDocument::Article(ArticleDocument::from_parts(report.parts))),
+        }
+      }
       Err(err) => Err(err),
     };
 
@@ -751,10 +754,6 @@ impl LanguageServer for Backend {
     let Some(state) = document_store.get(&uri) else {
       return Ok(None);
     };
-
-    if state.parsed.is_err() {
-      return Ok(None);
-    }
 
     if position_to_offset(state.text.as_ref(), position).is_none() {
       return Ok(None);
