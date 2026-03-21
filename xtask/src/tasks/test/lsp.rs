@@ -19,14 +19,14 @@ use tokio::{
 use tower_lsp::{
   jsonrpc::{self, ErrorCode},
   lsp_types::{
-    ClientCapabilities, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesClientCapabilities, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentFormattingParams, DynamicRegistrationClientCapabilities, FileChangeType,
-    FileEvent, FormattingOptions, Hover, HoverParams, InitializeParams, InitializeResult, OneOf, Position,
-    PublishDiagnosticsParams, ServerInfo, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextDocumentSyncCapability,
-    TextDocumentSyncClientCapabilities, TextDocumentSyncKind, TextEdit, Url, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceClientCapabilities,
+    ClientCapabilities, CompletionContext, CompletionParams, CompletionResponse, CompletionTriggerKind,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesClientCapabilities, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+    DynamicRegistrationClientCapabilities, FileChangeType, FileEvent, FormattingOptions, Hover, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, OneOf, Position, PublishDiagnosticsParams, ServerInfo,
+    TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncClientCapabilities, TextDocumentSyncKind,
+    TextEdit, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
     notification::{DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument},
     request::{
       Completion, Formatting, HoverRequest, RegisterCapability, Request as LspRequest, WorkDoneProgressCreate,
@@ -974,6 +974,17 @@ fn assert_core_capabilities(result: &InitializeResult) -> Result<()> {
     other => bail!("expected NovelSaga server_info, got {other:?}"),
   }
 
+  // Task 6: hover and completion capabilities
+  match result.capabilities.hover_provider {
+    Some(HoverProviderCapability::Simple(true)) => {}
+    ref other => bail!("expected hover provider enabled, got {other:?}"),
+  }
+
+  match &result.capabilities.completion_provider {
+    Some(options) if options.trigger_characters.is_none() => {}
+    ref other => bail!("expected completion provider with no trigger characters, got {other:?}"),
+  }
+
   Ok(())
 }
 
@@ -1015,7 +1026,10 @@ async fn request_completion(server: &LspServer, uri: Url, position: Position) ->
         text_document: TextDocumentIdentifier { uri },
         position,
       },
-      context: None,
+      context: Some(CompletionContext {
+        trigger_kind: CompletionTriggerKind::INVOKED,
+        trigger_character: None,
+      }),
       work_done_progress_params: WorkDoneProgressParams::default(),
       partial_result_params: Default::default(),
     })
